@@ -100,34 +100,32 @@ def reset_progress(update: Update, context: CallbackContext):
 
 def button_click(update: Update, context: CallbackContext):
     query = update.callback_query
-    query.answer()
 
     if "current_question" not in context.user_data:
-        query.edit_message_text("❌ Сессия устарела. Начните новый тест.")
+        query.answer("❌ Сессия устарела. Начните новый тест.")
         return
 
+    # Извлекаем данные из callback_data
     user_answer = query.data.split("_")[1]
     correct_answer = context.user_data["current_question"]["correct_answer"]
     word_id = context.user_data["current_question"]["word_id"]
     word_type = context.user_data["current_question"]["word_type"]
 
     if user_answer == correct_answer:
+        # Сообщаем об успехе только через query.answer
         query.answer("✅ Правильно! Молодец!")
-        try:
-            query.edit_message_text("✅ Правильно! Молодец!")
-        except BadRequest:
-            pass
-
         # Обновляем прогресс пользователя
         db.mark_word_as_seen(query.from_user.id, word_id, word_type)
-
+        # Удаляем информацию о текущем вопросе из сессии
         del context.user_data["current_question"]
+        # Запускаем следующий вопрос
         ask_question(update, context)
     else:
+        query.answer("❌ Неверно. Попробуй ещё раз!")
+        # При неверном ответе обновляем вариант клавиатуры, сохраняя те же данные вопроса
         current_question = context.user_data["current_question"]
-        options = current_question["options"]  # Используем сохраненные варианты ответов
+        options = current_question["options"]
         random.shuffle(options)
-
         keyboard = []
         for i in range(0, len(options), 2):
             row = []
@@ -135,19 +133,13 @@ def button_click(update: Update, context: CallbackContext):
                 callback_data = f"answer_{opt}_{random.randint(1, 1000)}"
                 row.append(InlineKeyboardButton(opt, callback_data=callback_data))
             keyboard.append(row)
-
         reply_markup = InlineKeyboardMarkup(keyboard)
-
-        query.answer("❌ Неверно. Попробуй еще раз!")
         try:
-            query.edit_message_text(
-                f"❌ Неверно. Попробуй еще раз!\nПереведи слово: *{current_question['word_en']}*",
-                parse_mode="Markdown",
-                reply_markup=reply_markup
-            )
+            # Обновляем только клавиатуру сообщения без изменения текста
+            query.edit_message_reply_markup(reply_markup=reply_markup)
         except BadRequest:
-            logger.warning("Сообщение не было изменено (дубликат).")
-
+            # Если сообщение уже изменено, ничего не предпринимаем
+            pass
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Действие отменено.", reply_markup=MAIN_MENU_KEYBOARD)
