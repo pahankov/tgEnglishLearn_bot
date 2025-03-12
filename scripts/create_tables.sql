@@ -24,3 +24,10 @@ CREATE TABLE IF NOT EXISTS user_progress (
     word_type VARCHAR(50),
     UNIQUE(user_id, word_id, word_type)
 );
+
+CREATE TABLE IF NOT EXISTS session_stats (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(user_id),
+    session_date TIMESTAMP,
+    learned_words INT
+);

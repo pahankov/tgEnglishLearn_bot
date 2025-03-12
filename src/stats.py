@@ -1,44 +1,114 @@
+import logging
+import io
+import matplotlib
+
+matplotlib.use('Agg')  # Используем backend, не зависящий от дисплея
+import matplotlib.pyplot as plt
+
 from telegram import Update
 from telegram.ext import CallbackContext
 from src.database import Database
-import logging
 
 logger = logging.getLogger(__name__)
 db = Database()
 
-def get_user_statistics(user_id: int) -> str:
+
+def get_user_statistics(user_id: int) -> dict:
     """
-    Собирает статистику по пользователю:
-      - Количество изученных слов (на основе таблицы user_progress)
-      - Процент правильных ответов (в данной логике 100%, так как сохраняются только правильно отгаданные слова)
-      - Динамика обучения (данные пока не собираются)
-    Возвращает отформатированный строковый отчет.
+    Собирает расширенную статистику по пользователю:
+      - learned_words: количество изученных слов (из таблицы user_progress);
+      - added_words: количество слов, добавленных пользователем (из таблицы user_words);
+      - session_stats: статистика сессий (из таблицы session_stats), возвращается как список кортежей (session_date, learned_words).
+
+    Если таблицы или столбцы не существуют, возвращает пустой список сессий.
     """
+    stats = {}
     try:
-        # Получаем количество изученных слов из таблицы user_progress
         db.cur.execute("SELECT COUNT(*) FROM user_progress WHERE user_id = %s", (user_id,))
-        learned_words = db.cur.fetchone()[0]
+        stats['learned_words'] = db.cur.fetchone()[0]
     except Exception as e:
-        logger.error(f"Ошибка получения статистики для user_id {user_id}: {e}")
-        learned_words = 0
+        logger.error(f"Ошибка получения изученных слов для user_id {user_id}: {e}")
+        stats['learned_words'] = 0
 
-    # В текущей реализации, так как в таблице user_progress записываются только правильно отгаданные слова,
-    # процент правильных ответов считается равным 100%.
-    correct_percent = 100
+    try:
+        db.cur.execute("SELECT COUNT(*) FROM user_words WHERE user_id = %s", (user_id,))
+        stats['added_words'] = db.cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Ошибка получения добавленных слов для user_id {user_id}: {e}")
+        stats['added_words'] = 0
 
-    stats_text = (
-        f"📊 **Ваша статистика**:\n\n"
-        f"Вы изучили: **{learned_words}** слов(а).\n"
-        f"Процент правильных ответов: **{correct_percent}%**.\n"
-        f"Динамика обучения: данные пока не собираются."
-    )
-    return stats_text
+    try:
+        # Этот запрос рассчитан на существование таблицы session_stats с нужными столбцами.
+        db.cur.execute(
+            "SELECT session_date, learned_words FROM session_stats WHERE user_id = %s ORDER BY session_date",
+            (user_id,)
+        )
+        stats['session_stats'] = db.cur.fetchall()  # Ожидается список кортежей (session_date, learned_words)
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики сессий для user_id {user_id}: {e}")
+        stats['session_stats'] = []
+
+    return stats
+
+
+def generate_stats_chart(session_stats):
+    """
+    Генерирует график динамики обучения на основе статистики сессий.
+    Принимает session_stats — список кортежей (session_date, learned_words).
+    Возвращает байтовый поток (BytesIO) с PNG-изображением графика.
+    Если нет данных, возвращает None.
+    """
+    if not session_stats:
+        return None
+
+    # Выделяем список дат и изученных слов
+    dates = [s[0] for s in session_stats]
+    words = [s[1] for s in session_stats]
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(dates, words, marker='o', linestyle='-', color='blue')
+    plt.xlabel("Дата сессии")
+    plt.ylabel("Изучено слов")
+    plt.title("Динамика обучения")
+    plt.grid(True)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+    return buf
+
 
 def stats_handler(update: Update, context: CallbackContext):
     """
-    Обработчик, вызываемый при запросе статистики.
-    Отправляет пользователю сообщение с его статистикой.
+    Обработчик статистики: собирает статистику пользователя, форматирует её
+    в виде текстового отчёта и отправляет динамический график (если доступен).
     """
     user_id = update.effective_user.id
-    stats_text = get_user_statistics(user_id)
-    update.message.reply_text(stats_text, parse_mode="Markdown")
+    stats = get_user_statistics(user_id)
+
+    text = (
+        f"📊 **Ваша статистика:**\n\n"
+        f"Изучено слов: **{stats.get('learned_words', 0)}**\n"
+        f"Добавлено слов: **{stats.get('added_words', 0)}**\n"
+    )
+
+    session_stats = stats.get('session_stats', [])
+    if session_stats:
+        text += "\n**Статистика сессий:**\n"
+        for session in session_stats:
+            # Если session_date — объект datetime, можно форматировать через strftime.
+            # Если это строка, оставить как есть.
+            date_str = session[0].strftime("%Y-%m-%d %H:%M") if hasattr(session[0], "strftime") else str(session[0])
+            text += f"• {date_str}: {session[1]} слов\n"
+    else:
+        text += "\nСтатистика сессий отсутствует.\n"
+
+    update.message.reply_text(text, parse_mode="Markdown")
+
+    chart_buf = generate_stats_chart(session_stats)
+    if chart_buf:
+        update.message.reply_photo(photo=chart_buf)
+    else:
+        update.message.reply_text("Динамический график недоступен.")
