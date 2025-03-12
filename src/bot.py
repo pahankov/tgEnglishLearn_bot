@@ -10,6 +10,9 @@ from src.database import Database
 from src.config import TOKEN
 import logging
 import random
+from src.word_management import (
+    add_word, save_word, delete_word, confirm_delete, show_user_words, WAITING_WORD, WAITING_DELETE
+)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,7 +21,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 db = Database()
-WAITING_WORD, WAITING_DELETE = range(2)
 
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -27,16 +29,6 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
-
-
-def pluralize_words(count: int) -> str:
-    if count % 10 == 1 and count % 100 != 11:
-        return "слово"
-    elif 2 <= count % 10 <= 4 and (count % 100 < 10 or count % 100 >= 20):
-        return "слова"
-    else:
-        return "слов"
-
 
 def start(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -47,7 +39,6 @@ def start(update: Update, context: CallbackContext):
         f"Привет, {user.first_name}! Я помогу тебе учить английский. 🎓",
         reply_markup=MAIN_MENU_KEYBOARD
     )
-
 
 def ask_question(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -77,7 +68,7 @@ def ask_question(update: Update, context: CallbackContext):
         "correct_answer": word_ru,
         "word_id": word_id,
         "word_type": word_type,
-        "options": options,  # Сохраняем варианты ответов
+        "options": options,
         "reply_markup": InlineKeyboardMarkup(keyboard)
     }
 
@@ -87,7 +78,6 @@ def ask_question(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=context.user_data["current_question"]["reply_markup"]
     )
-
 
 def button_click(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -106,16 +96,15 @@ def button_click(update: Update, context: CallbackContext):
         try:
             query.edit_message_text("✅ Правильно! Молодец!")
         except BadRequest:
-            pass  # Игнорируем ошибку, если сообщение уже изменено
+            pass
 
-        # Обновляем прогресс пользователя
         db.mark_word_as_seen(query.from_user.id, word_id, word_type)
 
         del context.user_data["current_question"]
         ask_question(update, context)
     else:
         current_question = context.user_data["current_question"]
-        options = current_question["options"]  # Используем сохраненные варианты ответов
+        options = current_question["options"]
         random.shuffle(options)
 
         keyboard = []
@@ -137,91 +126,26 @@ def button_click(update: Update, context: CallbackContext):
         except BadRequest:
             logger.warning("Сообщение не было изменено (дубликат).")
 
-
-def add_word(update: Update, context: CallbackContext):
-    update.message.reply_text("Введите слово в формате: Английское-Русское (например: apple-яблоко)")
-    return WAITING_WORD
-
-
-def save_word(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    text = update.message.text.strip().split('-')
-
-    if len(text) != 2:
-        update.message.reply_text("❌ Неверный формат. Попробуйте еще раз.")
-        return WAITING_WORD
-
-    en_word, ru_word = text[0].strip(), text[1].strip()
-    success = db.add_user_word(user_id, en_word, ru_word)
-
-    if success:
-        count = db.count_user_words(user_id)
-        word_form = pluralize_words(count)
-        update.message.reply_text(
-            f"✅ Слово добавлено! Теперь у вас {count} {word_form}.",
-            reply_markup=MAIN_MENU_KEYBOARD
-        )
-    else:
-        update.message.reply_text("❌ Это слово уже есть в вашем списке.", reply_markup=MAIN_MENU_KEYBOARD)
-    return ConversationHandler.END
-
-
-def delete_word(update: Update, context: CallbackContext):
-    update.message.reply_text("Введите английское слово для удаления:")
-    return WAITING_DELETE
-
-
-def confirm_delete(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    en_word = update.message.text.strip()
-    success = db.delete_user_word(user_id, en_word)
-
-    if success:
-        update.message.reply_text(f"🗑️ Слово '{en_word}' удалено.", reply_markup=MAIN_MENU_KEYBOARD)
-    else:
-        update.message.reply_text("❌ Такого слова нет в вашем списке.", reply_markup=MAIN_MENU_KEYBOARD)
-    return ConversationHandler.END
-
-
-def show_user_words(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    words = db.get_user_words(user_id)
-
-    if not words:
-        update.message.reply_text("📭 У вас пока нет своих слов.", reply_markup=MAIN_MENU_KEYBOARD)
-    else:
-        formatted_words = []
-        for en, ru in words:
-            formatted_en = en.capitalize()  # Выводим с заглавной буквы
-            formatted_ru = ru.capitalize()
-            formatted_words.append(f"• {formatted_en} — {formatted_ru}")
-
-        count = len(words)
-        word_form = pluralize_words(count)
-        text = f"📖 Ваши слова ({count} {word_form}):\n" + "\n".join(formatted_words)
-        update.message.reply_text(text, reply_markup=MAIN_MENU_KEYBOARD)
-
-
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Действие отменено.", reply_markup=MAIN_MENU_KEYBOARD)
     return ConversationHandler.END
-
 
 def error_handler(update: Update, context: CallbackContext):
     logger.error(f"Ошибка: {context.error}", exc_info=context.error)
     if update.effective_message:
         update.effective_message.reply_text("⚠️ Произошла ошибка. Попробуйте снова.")
 
-
 def main():
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
+    # Добавление обработчиков команд и сообщений
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CallbackQueryHandler(button_click))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^Начать тест 🚀$'), ask_question))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^Мои слова 📖$'), show_user_words))
 
+    # Обработчик для добавления и удаления слов
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(Filters.regex(r'^Добавить слово ➕$'), add_word),
@@ -236,9 +160,13 @@ def main():
     dispatcher.add_handler(conv_handler)
     dispatcher.add_error_handler(error_handler)
 
+    # Настройка главного меню клавиатуры в контексте бота
+    context = dispatcher.bot_data
+    context["main_menu_keyboard"] = MAIN_MENU_KEYBOARD
+
+    # Запуск бота
     updater.start_polling()
     updater.idle()
-
 
 if __name__ == "__main__":
     main()
