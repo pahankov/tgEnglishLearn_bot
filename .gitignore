@@ -1,0 +1,15 @@
+# Virtual environment
+.venv/
+.env
+
+# Logs
+*.log
+
+# Database
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+
+forMe.txt

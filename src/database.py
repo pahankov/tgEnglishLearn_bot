@@ -1,0 +1,131 @@
+import psycopg2
+import logging
+from pathlib import Path
+from typing import List, Tuple, Optional
+from src.config import DB_CONFIG
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class Database:
+    def __init__(self):
+        try:
+            self.conn = psycopg2.connect(**DB_CONFIG)
+            self.cur = self.conn.cursor()
+            self.base_dir = Path(__file__).resolve().parent.parent
+
+            # Логирование начала выполнения скриптов
+            logger.info("Создание таблиц...")
+            self._create_tables()
+            logger.info("Таблицы созданы.")
+
+            logger.info("Заполнение данными...")
+            self._seed_data()
+            logger.info("Данные загружены.")
+
+            logger.info("Подключение к базе данных успешно установлено.")
+        except Exception as e:
+            logger.error(f"Ошибка при подключении к базе данных: {e}")
+
+    def _execute_sql_script(self, script_path: str):
+        try:
+            with open(script_path, 'r', encoding='utf-8') as f:
+                sql = f.read()
+            self.cur.execute(sql)
+            self.conn.commit()
+            logger.info(f"Скрипт {script_path} выполнен успешно.")
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении скрипта {script_path}: {e}")
+            self.conn.rollback()
+
+    def _create_tables(self):
+        self._execute_sql_script(str(self.base_dir / "scripts/create_tables.sql"))
+
+    def _seed_data(self):
+        self._execute_sql_script(str(self.base_dir / "scripts/seed_data.sql"))
+
+    def get_user(self, user_id: int) -> Optional[Tuple]:
+        self.cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+        return self.cur.fetchone()
+
+    def create_user(self, user_id: int, username: str, first_name: str):
+        try:
+            self.cur.execute(
+                "INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s)",
+                (user_id, username, first_name)
+            )
+            self.conn.commit()
+        except psycopg2.IntegrityError:
+            self.conn.rollback()
+
+    def get_random_word(self, user_id: int) -> Optional[Tuple[str, str]]:
+        try:
+            self.cur.execute("""
+                SELECT english_word, russian_translation FROM (
+                    SELECT english_word, russian_translation FROM common_words
+                    UNION ALL
+                    SELECT english_word, russian_translation FROM user_words 
+                    WHERE user_id = %s
+                ) AS all_words
+                ORDER BY RANDOM()
+                LIMIT 1;
+            """, (user_id,))
+            result = self.cur.fetchone()
+            logger.info(f"Случайное слово: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка в get_random_word: {e}")
+            return None
+
+    def get_wrong_translations(self, correct_word: str, limit: int = 3) -> List[str]:
+        self.cur.execute("""
+            SELECT russian_translation FROM common_words
+            WHERE russian_translation != %s
+            ORDER BY RANDOM()
+            LIMIT %s;
+        """, (correct_word, limit))
+        return [row[0] for row in self.cur.fetchall()]
+
+    def add_user_word(self, user_id: int, en_word: str, ru_word: str) -> bool:
+        en_word = en_word.strip().lower()  # Приводим к нижнему регистру
+        ru_word = ru_word.strip().lower()
+        try:
+            self.cur.execute(
+                "INSERT INTO user_words (user_id, english_word, russian_translation) VALUES (%s, %s, %s)",
+                (user_id, en_word, ru_word)
+            )
+            self.conn.commit()
+            return True
+        except psycopg2.IntegrityError:
+            self.conn.rollback()
+            return False
+
+    def delete_user_word(self, user_id: int, en_word: str) -> bool:
+        en_word = en_word.strip().lower()  # Приводим к нижнему регистру
+        self.cur.execute(
+            "DELETE FROM user_words WHERE user_id = %s AND english_word = %s",
+            (user_id, en_word)
+        )
+        deleted_rows = self.cur.rowcount
+        self.conn.commit()
+        return deleted_rows > 0
+
+    def count_user_words(self, user_id: int) -> int:
+        self.cur.execute("SELECT COUNT(*) FROM user_words WHERE user_id = %s", (user_id,))
+        return self.cur.fetchone()[0]
+
+    def close(self):
+        self.cur.close()
+        self.conn.close()
+
+    def get_user_words(self, user_id: int) -> List[Tuple[str, str]]:
+        try:
+            self.cur.execute(
+                "SELECT english_word, russian_translation FROM user_words WHERE user_id = %s",
+                (user_id,)
+            )
+            result = self.cur.fetchall()
+            return [(row[0], row[1]) for row in result]  # Явное указание типов данных
+        except Exception as e:
+            logger.error(f"Ошибка в get_user_words: {e}")
+            return []
