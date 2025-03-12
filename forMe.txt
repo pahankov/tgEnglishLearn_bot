@@ -1,0 +1,10 @@
+def button_click(update: Update, context: CallbackContext):
+    query = update.callback_query
+    try:
+        user_answer = query.data.split("_")[1]
+        correct_answer = context.user_data.get("correct_answer")
+
+        if user_answer == correct_answer:
+            query.answer("✅ Правильно! Молодец!")
+        else:
+            query.answer(f"❌ Неверно. Правильный ответ: {correct_answer}")
