@@ -129,3 +129,35 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка в get_user_words: {e}")
             return []
+
+    def get_unseen_word(self, user_id: int) -> Optional[Tuple[str, str]]:
+        try:
+            self.cur.execute("""
+                SELECT w.english_word, w.russian_translation, 'common' AS word_type, w.id
+                FROM common_words w
+                LEFT JOIN user_progress p ON w.id = p.word_id AND p.word_type = 'common' AND p.user_id = %s
+                WHERE p.id IS NULL
+                UNION ALL
+                SELECT w.english_word, w.russian_translation, 'user' AS word_type, w.id
+                FROM user_words w
+                LEFT JOIN user_progress p ON w.id = p.word_id AND p.word_type = 'user' AND p.user_id = %s
+                WHERE p.id IS NULL AND w.user_id = %s
+                LIMIT 1;
+            """, (user_id, user_id, user_id))
+            result = self.cur.fetchone()
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка в get_unseen_word: {e}")
+            return None
+
+    def mark_word_as_seen(self, user_id: int, word_id: int, word_type: str):
+        try:
+            self.cur.execute("""
+                INSERT INTO user_progress (user_id, word_id, word_type)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, word_id, word_type) DO NOTHING;
+            """, (user_id, word_id, word_type))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Ошибка в mark_word_as_seen: {e}")
+            self.conn.rollback()

@@ -51,17 +51,17 @@ def start(update: Update, context: CallbackContext):
 
 def ask_question(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    word_pair = db.get_random_word(user_id)
+    word_info = db.get_unseen_word(user_id)
 
-    if not word_pair:
+    if not word_info:
         context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="❌ Нет доступных слов. Добавьте новые!",
+            text="🎉 Вы молодец! Вы изучили все доступные слова. Продолжайте в том же духе!",
             reply_markup=MAIN_MENU_KEYBOARD
         )
         return
 
-    word_en, word_ru = word_pair
+    word_en, word_ru, word_type, word_id = word_info
     wrong_answers = db.get_wrong_translations(word_ru, 3)
     options = [word_ru] + wrong_answers
     random.shuffle(options)
@@ -75,6 +75,9 @@ def ask_question(update: Update, context: CallbackContext):
     context.user_data["current_question"] = {
         "word_en": word_en,
         "correct_answer": word_ru,
+        "word_id": word_id,
+        "word_type": word_type,
+        "options": options,  # Сохраняем варианты ответов
         "reply_markup": InlineKeyboardMarkup(keyboard)
     }
 
@@ -96,27 +99,29 @@ def button_click(update: Update, context: CallbackContext):
 
     user_answer = query.data.split("_")[1]
     correct_answer = context.user_data["current_question"]["correct_answer"]
+    word_id = context.user_data["current_question"]["word_id"]
+    word_type = context.user_data["current_question"]["word_type"]
 
     if user_answer == correct_answer:
         try:
             query.edit_message_text("✅ Правильно! Молодец!")
         except BadRequest:
             pass  # Игнорируем ошибку, если сообщение уже изменено
+
+        # Обновляем прогресс пользователя
+        db.mark_word_as_seen(query.from_user.id, word_id, word_type)
+
         del context.user_data["current_question"]
         ask_question(update, context)
     else:
         current_question = context.user_data["current_question"]
-        options = [
-            current_question["correct_answer"]
-        ] + db.get_wrong_translations(current_question["correct_answer"], 3)
+        options = current_question["options"]  # Используем сохраненные варианты ответов
         random.shuffle(options)
 
-        # Генерируем новую клавиатуру с уникальными callback_data
         keyboard = []
         for i in range(0, len(options), 2):
             row = []
             for opt in options[i:i + 2]:
-                # Уникальный callback_data для каждой кнопки
                 callback_data = f"answer_{opt}_{random.randint(1, 1000)}"
                 row.append(InlineKeyboardButton(opt, callback_data=callback_data))
             keyboard.append(row)
