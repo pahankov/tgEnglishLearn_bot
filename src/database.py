@@ -132,19 +132,22 @@ class Database:
 
     def get_unseen_word(self, user_id: int) -> Optional[Tuple[str, str]]:
         try:
-            self.cur.execute("""
-                SELECT w.english_word, w.russian_translation, 'common' AS word_type, w.id
+            query = """
+                SELECT w.english_word, w.russian_translation, 'common' AS word_type, w.word_id
                 FROM common_words w
-                LEFT JOIN user_progress p ON w.id = p.word_id AND p.word_type = 'common' AND p.user_id = %s
-                WHERE p.id IS NULL
+                LEFT JOIN user_progress p ON w.word_id = p.word_id AND p.word_type = 'common' AND p.user_id = %s
+                WHERE p.word_id IS NULL
                 UNION ALL
-                SELECT w.english_word, w.russian_translation, 'user' AS word_type, w.id
+                SELECT w.english_word, w.russian_translation, 'user' AS word_type, w.user_word_id
                 FROM user_words w
-                LEFT JOIN user_progress p ON w.id = p.word_id AND p.word_type = 'user' AND p.user_id = %s
-                WHERE p.id IS NULL AND w.user_id = %s
+                LEFT JOIN user_progress p ON w.user_word_id = p.word_id AND p.word_type = 'user' AND p.user_id = %s
+                WHERE p.word_id IS NULL AND w.user_id = %s
                 LIMIT 1;
-            """, (user_id, user_id, user_id))
+            """
+            logger.info(f"SQL Query: {query}")
+            self.cur.execute(query, (user_id, user_id, user_id))
             result = self.cur.fetchone()
+            logger.info(f"Query Result: {result}")
             return result
         except Exception as e:
             logger.error(f"Ошибка в get_unseen_word: {e}")
