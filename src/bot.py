@@ -45,10 +45,12 @@ def ask_question(update: Update, context: CallbackContext):
     word_info = db.get_unseen_word(user_id)
 
     if not word_info:
+        keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="🎉 Вы молодец! Вы изучили все доступные слова. Продолжайте в том же духе!",
-            reply_markup=MAIN_MENU_KEYBOARD
+            reply_markup=reply_markup
         )
         return
 
@@ -68,7 +70,7 @@ def ask_question(update: Update, context: CallbackContext):
         "correct_answer": word_ru,
         "word_id": word_id,
         "word_type": word_type,
-        "options": options,
+        "options": options,  # Сохраняем варианты ответов
         "reply_markup": InlineKeyboardMarkup(keyboard)
     }
 
@@ -78,6 +80,23 @@ def ask_question(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=context.user_data["current_question"]["reply_markup"]
     )
+
+
+def reset_progress(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    logger.info(f"reset_progress вызван для user_id: {user_id}")
+    try:
+        db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
+        db.conn.commit()
+        row_count = db.cur.rowcount
+        logger.info(f"Прогресс сброшен для user_id {user_id}: удалено записей: {row_count}")
+        update.callback_query.answer("Прогресс сброшен! Давайте начнем заново.")
+        ask_question(update, context)
+    except Exception as e:
+        logger.error(f"Ошибка при сбросе прогресса для user_id {user_id}: {e}")
+        db.conn.rollback()
+        update.callback_query.answer("Ошибка при сбросе прогресса. Попробуйте снова.")
+
 
 def button_click(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -93,18 +112,20 @@ def button_click(update: Update, context: CallbackContext):
     word_type = context.user_data["current_question"]["word_type"]
 
     if user_answer == correct_answer:
+        query.answer("✅ Правильно! Молодец!")
         try:
             query.edit_message_text("✅ Правильно! Молодец!")
         except BadRequest:
             pass
 
+        # Обновляем прогресс пользователя
         db.mark_word_as_seen(query.from_user.id, word_id, word_type)
 
         del context.user_data["current_question"]
         ask_question(update, context)
     else:
         current_question = context.user_data["current_question"]
-        options = current_question["options"]
+        options = current_question["options"]  # Используем сохраненные варианты ответов
         random.shuffle(options)
 
         keyboard = []
@@ -117,6 +138,7 @@ def button_click(update: Update, context: CallbackContext):
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        query.answer("❌ Неверно. Попробуй еще раз!")
         try:
             query.edit_message_text(
                 f"❌ Неверно. Попробуй еще раз!\nПереведи слово: *{current_question['word_en']}*",
@@ -125,6 +147,7 @@ def button_click(update: Update, context: CallbackContext):
             )
         except BadRequest:
             logger.warning("Сообщение не было изменено (дубликат).")
+
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Действие отменено.", reply_markup=MAIN_MENU_KEYBOARD)
@@ -135,17 +158,20 @@ def error_handler(update: Update, context: CallbackContext):
     if update.effective_message:
         update.effective_message.reply_text("⚠️ Произошла ошибка. Попробуйте снова.")
 
+
 def main():
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
-    # Добавление обработчиков команд и сообщений
-    dispatcher.add_handler(CommandHandler("start", start))
+    # Сначала обрабатываем callback-запрос для сброса прогресса:
+    dispatcher.add_handler(CallbackQueryHandler(reset_progress, pattern="^reset_progress$"))
+    # Затем общий обработчик callback-запросов:
     dispatcher.add_handler(CallbackQueryHandler(button_click))
+
+    dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^Начать тест 🚀$'), ask_question))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^Мои слова 📖$'), show_user_words))
 
-    # Обработчик для добавления и удаления слов
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(Filters.regex(r'^Добавить слово ➕$'), add_word),
@@ -160,13 +186,9 @@ def main():
     dispatcher.add_handler(conv_handler)
     dispatcher.add_error_handler(error_handler)
 
-    # Настройка главного меню клавиатуры в контексте бота
-    context = dispatcher.bot_data
-    context["main_menu_keyboard"] = MAIN_MENU_KEYBOARD
-
-    # Запуск бота
     updater.start_polling()
     updater.idle()
+
 
 if __name__ == "__main__":
     main()
