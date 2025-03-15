@@ -1,4 +1,3 @@
-# keyboards.py
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
 def main_menu_keyboard():
@@ -11,15 +10,17 @@ def main_menu_keyboard():
         resize_keyboard=True
     )
 
+def add_more_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("Добавить ещё ➕"), KeyboardButton("В меню ↩️")]
+        ],
+        resize_keyboard=True
+    )
+
 def answer_keyboard(options):
-    """
-    Формирует inline-клавиатуру из списка вариантов ответа.
-    Каждый ряд содержит по 2 кнопки.
-    """
     keyboard = []
     for i in range(0, len(options), 2):
-        row = []
-        for opt in options[i:i + 2]:
-            row.append(InlineKeyboardButton(opt, callback_data=f"answer_{opt}"))
+        row = [InlineKeyboardButton(opt, callback_data=f"answer_{opt}") for opt in options[i:i+2]]
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
