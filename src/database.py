@@ -100,12 +100,20 @@ class Database:
         self.cur.execute(query, (user_id, english_word, russian_word))
         self.conn.commit()
 
-    def delete_user_word(self, user_id: int, en_word: str) -> bool:
-        en_word = en_word.strip().lower()  # Приводим к нижнему регистру
-        self.cur.execute(
-            "DELETE FROM user_words WHERE user_id = %s AND english_word = %s",
-            (user_id, en_word)
-        )
+    def delete_user_word(self, user_id: int, word: str) -> bool:
+        """
+        Удаляет пользовательское слово по английскому или русскому слову.
+        :param user_id: ID пользователя
+        :param word: Слово для удаления (английское или русское)
+        :return: True, если слово успешно удалено, иначе False
+        """
+        query = """
+            DELETE FROM user_words
+            WHERE user_id = %s AND (
+                LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s)
+            )
+        """
+        self.cur.execute(query, (user_id, word, word))
         deleted_rows = self.cur.rowcount
         self.conn.commit()
         return deleted_rows > 0
@@ -182,3 +190,4 @@ class Database:
         self.cur.execute(query, (english_word, russian_word, english_word, russian_word))
         result = self.cur.fetchone()
         return result is not None
+
