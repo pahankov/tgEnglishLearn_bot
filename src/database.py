@@ -162,10 +162,14 @@ class Database:
             logger.error(f"Ошибка в mark_word_as_seen: {e}")
             self.conn.rollback()
 
-    def check_duplicate(self, english_word: str, russian_word: str) -> bool:
+    def check_duplicate(self, user_id: int, word: str) -> bool:
+        """Проверяет наличие слова в common_words и user_words"""
         self.cur.execute("""
-            SELECT 1 FROM user_words 
-            WHERE english_word = LOWER(%s) OR russian_translation = LOWER(%s)
+            (SELECT 1 FROM common_words 
+             WHERE LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s))
+            UNION ALL
+            (SELECT 1 FROM user_words 
+             WHERE user_id = %s AND (LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s)))
             LIMIT 1
-        """, (english_word, russian_word))
+        """, (word, word, user_id, word, word))
         return bool(self.cur.fetchone())

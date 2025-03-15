@@ -7,6 +7,7 @@ from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
 import os
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -36,43 +37,62 @@ def add_word(update: Update, context: CallbackContext) -> int:
     )
     return WAITING_WORD
 
-
 def save_word(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-    ru_word = update.message.text.strip().lower()
+    input_text = update.message.text.strip().lower()
 
-    if not ru_word.isalpha():
-        update.message.reply_text("❌ Некорректное слово. Используйте только буквы.")
+    # Проверка на одно слово
+    if len(input_text.split()) > 1:
+        update.message.reply_text(
+            "❌ Пожалуйста, введите только ОДНО слово.",
+            reply_markup=main_menu_keyboard()
+        )
         return WAITING_WORD
 
+    # Проверка символов
+    if not re.match(r'^[а-яё\-]+$', input_text):
+        update.message.reply_text(
+            "❌ Используйте только русские буквы и дефис.",
+            reply_markup=main_menu_keyboard()
+        )
+        return WAITING_WORD
+
+    # Получение перевода
     try:
-        api_response = yandex_api.lookup(ru_word, "ru-en")
-        if not api_response or 'def' not in api_response or not api_response['def']:
-            update.message.reply_text("❌ Перевод не найден.")
+        api_response = yandex_api.lookup(input_text, "ru-en")
+        if not api_response or not api_response.get('def'):
+            update.message.reply_text("❌ Перевод не найден.", reply_markup=main_menu_keyboard())
             return WAITING_WORD
 
         first_translation = api_response['def'][0]['tr'][0]['text'].lower()
     except Exception as e:
         logger.error(f"Ошибка перевода: {e}")
-        update.message.reply_text("❌ Ошибка обработки перевода.")
+        update.message.reply_text("❌ Ошибка обработки перевода.", reply_markup=main_menu_keyboard())
         return WAITING_WORD
 
-    if db.add_user_word(user_id, first_translation, ru_word):
-        count = db.count_user_words(user_id)
-        word_form = pluralize_words(count)
+    # Проверка дубликатов во всех базах
+    if db.check_duplicate(user_id, first_translation, input_text):
         update.message.reply_text(
-            f"✅ Слово '{ru_word}' добавлено с переводом '{first_translation}'!\n"
-            f"Теперь у вас {count} {word_form}.",
+            f"❌ Слово '{input_text}' или его перевод уже существуют в базе!",
+            reply_markup=main_menu_keyboard()
+        )
+        return WAITING_WORD
+
+    # Добавление слова
+    if db.add_user_word(user_id, first_translation, input_text):
+        count = db.count_user_words(user_id)
+        update.message.reply_text(
+            f"✅ Слово '{input_text}' успешно добавлено!\n"
+            f"Всего ваших слов: {count}",
             reply_markup=main_menu_keyboard()
         )
     else:
         update.message.reply_text(
-            f"❌ Слово '{ru_word}' с переводом '{first_translation}' уже существует!",
+            "❌ Не удалось добавить слово. Попробуйте снова.",
             reply_markup=main_menu_keyboard()
         )
 
     return ConversationHandler.END
-
 
 def delete_word(update: Update, context: CallbackContext) -> int:
     update.message.reply_text(
