@@ -1,6 +1,8 @@
-# quiz.py
+from typing import List  # Добавляем необходимый импорт
+from src.database import Database
+
 class QuizManager:
-    def __init__(self, db):
+    def __init__(self, db: Database):
         self.db = db
         self.correct_responses = [
             "✅ Отлично! Молодец! 🎉",
@@ -19,21 +21,22 @@ class QuizManager:
         self.correct_index = 0
         self.incorrect_index = 0
 
-    def get_next_question(self, user_id):
+    def get_next_question(self, user_id: int) -> tuple:
         return self.db.get_unseen_word(user_id)
 
-    def get_wrong_answers(self, correct_word, limit=3):
-        return self.db.get_wrong_translations(correct_word, limit)
+    def get_wrong_answers(self, correct_word: str, limit: int = 3) -> List[str]:
+        """Возвращает уникальные варианты в нижнем регистре"""
+        return self.db.get_wrong_translations(correct_word.lower(), limit)
 
-    def mark_word_seen(self, user_id, word_id, word_type):
+    def mark_word_seen(self, user_id: int, word_id: int, word_type: str):
         self.db.mark_word_as_seen(user_id, word_id, word_type)
 
-    def get_correct_response(self):
+    def get_correct_response(self) -> str:
         resp = self.correct_responses[self.correct_index]
         self.correct_index = (self.correct_index + 1) % len(self.correct_responses)
         return resp
 
-    def get_incorrect_response(self):
+    def get_incorrect_response(self) -> str:
         resp = self.incorrect_responses[self.incorrect_index]
         self.incorrect_index = (self.incorrect_index + 1) % len(self.incorrect_responses)
         return resp

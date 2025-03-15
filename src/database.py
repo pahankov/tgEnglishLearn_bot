@@ -76,12 +76,15 @@ class Database:
             return None
 
     def get_wrong_translations(self, correct_word: str, limit: int = 3) -> List[str]:
+        """Возвращает уникальные варианты в нижнем регистре"""
         self.cur.execute("""
-            SELECT russian_translation FROM common_words
-            WHERE russian_translation != %s
+            SELECT LOWER(russian_translation) 
+            FROM common_words 
+            WHERE LOWER(russian_translation) != LOWER(%s)
+            GROUP BY LOWER(russian_translation)  -- Убираем дубли
             ORDER BY RANDOM()
             LIMIT %s;
-        """, (correct_word, limit))
+        """, (correct_word.lower(), limit))
         return [row[0] for row in self.cur.fetchall()]
 
     def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> bool:

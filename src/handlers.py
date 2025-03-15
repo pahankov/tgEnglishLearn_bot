@@ -1,6 +1,7 @@
 import os
 import random
 import logging
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
@@ -10,7 +11,6 @@ from src.word_management import add_word, save_word, delete_word, confirm_delete
     WAITING_DELETE
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-import re
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -50,14 +50,23 @@ def ask_question_handler(update: Update, context: CallbackContext):
         return
 
     word_en, word_ru, word_type, word_id = question
-    wrong_answers = quiz.get_wrong_answers(word_ru)
-    options = [word_ru] + wrong_answers
+
+    # Получаем варианты в нижнем регистре и убираем дубликаты
+    wrong_answers = list({
+        ans.lower()
+        for ans in quiz.get_wrong_answers(word_ru)
+        if ans.lower() != word_ru.lower()
+    })[:3]  # Берем первые 3 уникальных
+
+    # Формируем варианты с правильным регистром
+    options = [word_ru.capitalize()] + [ans.capitalize() for ans in wrong_answers]
     random.shuffle(options)
+
     reply_markup = answer_keyboard(options)
 
     context.user_data["current_question"] = {
         "word_en": word_en,
-        "correct_answer": word_ru,
+        "correct_answer": word_ru.capitalize(),  # Сохраняем с правильным регистром
         "word_id": word_id,
         "word_type": word_type,
         "options": options,
