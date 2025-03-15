@@ -47,23 +47,12 @@ def add_word(update: Update, context: CallbackContext) -> int:
     return WAITING_WORD
 
 
-BUTTON_TEXTS = {"Добавить слово ➕", "Назад", "Мои слова 📖", "Удалить слово ➖"}
-
 def save_word(update: Update, context: CallbackContext) -> int:
     """
     Сохраняет русское слово, добавленное пользователем, и добавляет его перевод через Яндекс API.
     """
     user_id = update.effective_user.id
     ru_word = update.message.text.strip()
-
-    # Проверяем, не является ли введённый текст кнопкой
-    if ru_word in BUTTON_TEXTS:
-        logger.info(f"Текст кнопки '{ru_word}' проигнорирован.")
-        update.message.reply_text(
-            "❌ Пожалуйста, введите слово вручную.",
-            reply_markup=main_menu_keyboard()
-        )
-        return WAITING_WORD
 
     # Проверяем, что текст является валидным русским словом
     if not ru_word.isalpha():
@@ -77,33 +66,48 @@ def save_word(update: Update, context: CallbackContext) -> int:
         # Получаем перевод через Яндекс API
         en_translation = yandex_api.lookup(ru_word, "ru-en")
         if not en_translation:
-            raise ValueError(f"Перевод для '{ru_word}' не найден.")
-        first_translation = en_translation[0]
-        logger.info(f"Первый перевод для '{ru_word}': '{first_translation}'.")
+            update.message.reply_text(
+                f"❌ Перевод для слова '{ru_word}' не найден. Попробуйте другое слово.",
+                reply_markup=main_menu_keyboard()
+            )
+            return WAITING_WORD
+
+        # Логируем успешный перевод
+        logger.info(f"Перевод для '{ru_word}': '{en_translation}'.")
     except Exception as e:
         logger.error(f"Ошибка при обращении к Яндекс.Словарю для '{ru_word}': {e}")
         update.message.reply_text(
-            f"❌ Не удалось получить перевод для '{ru_word}'. Попробуйте снова.",
+            "❌ Произошла ошибка при запросе. Попробуйте снова.",
             reply_markup=main_menu_keyboard()
         )
         return WAITING_WORD
 
     # Добавляем слово в базу данных
-    success = db.add_user_word(user_id, first_translation, ru_word)
-    if success:
-        count = db.count_user_words(user_id)
-        word_form = pluralize_words(count)
+    try:
+        success = db.add_user_word(user_id, en_translation, ru_word)
+        if success:
+            count = db.count_user_words(user_id)
+            word_form = pluralize_words(count)
+            update.message.reply_text(
+                f"✅ Слово '{ru_word}' добавлено с переводом '{en_translation}'.\n"
+                f"Теперь у вас {count} {word_form} в вашем словаре.",
+                reply_markup=main_menu_keyboard()
+            )
+            logger.info(f"Пользователь {user_id}: слово '{ru_word}' добавлено с переводом '{en_translation}'.")
+        else:
+            update.message.reply_text(
+                f"❌ Слово '{ru_word}' с переводом '{en_translation}' уже есть в вашем списке.",
+                reply_markup=main_menu_keyboard()
+            )
+            logger.warning(f"Пользователь {user_id} пытался добавить существующее слово: '{ru_word}' ({en_translation}).")
+    except Exception as e:
+        db.conn.rollback()
+        logger.error(f"Ошибка при добавлении слова '{ru_word}': {e}")
         update.message.reply_text(
-            f"✅ Слово добавлено! Теперь у вас {count} {word_form}.",
+            "❌ Произошла ошибка при добавлении слова. Попробуйте снова.",
             reply_markup=main_menu_keyboard()
         )
-    else:
-        update.message.reply_text(
-            f"❌ Слово '{ru_word}' с переводом '{first_translation}' уже есть в вашем списке.",
-            reply_markup=main_menu_keyboard()
-        )
-    return ConversationHandler.END
-
+    return WAITING_WORD
 
 
 def delete_word(update: Update, context: CallbackContext) -> int:
