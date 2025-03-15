@@ -143,10 +143,10 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     russian_word = update.message.text.strip()
 
-    # Проверяем, что введено хотя бы одно слово
+    # Проверяем, что введено осмысленное слово
     if not russian_word:
-        update.message.reply_text("❌ Пожалуйста, введите слово на русском языке.")
-        logger.warning(f"Пользователь {user_id} ничего не ввёл.")
+        update.message.reply_text("❌ Пожалуйста, введите осмысленное слово на русском языке.")
+        logger.warning(f"Пользователь {user_id} ввёл пустое слово.")
         return WAITING_WORD
 
     logger.info(f"Пользователь {user_id} добавляет русское слово '{russian_word}'.")
@@ -156,19 +156,37 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
 
     if not api_response:
         update.message.reply_text(f"❌ Не удалось найти перевод для '{russian_word}'. Попробуйте другое слово.")
-        logger.warning(f"API не вернул перевод для '{russian_word}'")
+        logger.warning(f"API не вернул перевод для '{russian_word}'.")
         return WAITING_WORD
 
-    # Извлекаем первый перевод из ответа
     try:
-        translations = [item["text"] for item in api_response.get("def", [])[0].get("tr", [])]
+        definitions = api_response.get("def", [])
+        if not definitions:
+            raise ValueError("Пустой ответ API: отсутствуют 'def'.")
+
+        translations = [item["text"] for item in definitions[0].get("tr", [])]
         if not translations:
-            raise ValueError("Переводы отсутствуют в ответе API.")
-        first_translation = translations[0]
+            raise ValueError("Пустой ответ API: отсутствуют 'tr'.")
+
+        # Приводим перевод к нижнему регистру
+        first_translation = translations[0].lower()
         logger.info(f"Первый перевод для '{russian_word}': '{first_translation}'.")
     except (IndexError, KeyError, ValueError) as e:
-        logger.error(f"Ошибка при обработке ответа API: {e}")
-        update.message.reply_text("❌ Ошибка при обработке перевода. Попробуйте позже.")
+        logger.error(f"Ошибка при обработке ответа API для '{russian_word}': {e}")
+        update.message.reply_text(f"❌ Ошибка при обработке перевода для '{russian_word}'. Попробуйте позже.")
+        return WAITING_WORD
+
+    # Приводим русское слово к нижнему регистру
+    russian_word = russian_word.lower()
+
+    # Проверяем наличие дубликата в базе данных
+    if db.check_duplicate(first_translation, russian_word):
+        update.message.reply_text(
+            f"❌ Слово '{russian_word}' с переводом '{first_translation}' уже существует в вашем словаре."
+        )
+        logger.warning(
+            f"Дубликат обнаружен: слово '{first_translation}' или перевод '{russian_word}' уже существует для пользователя {user_id}."
+        )
         return WAITING_WORD
 
     # Сохраняем слово в базу данных

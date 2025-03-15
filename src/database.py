@@ -86,19 +86,19 @@ class Database:
         """, (correct_word, limit))
         return [row[0] for row in self.cur.fetchall()]
 
-    def add_user_word(self, user_id: int, en_word: str, ru_word: str) -> bool:
-        en_word = en_word.strip().lower()  # Приводим к нижнему регистру
-        ru_word = ru_word.strip().lower()
-        try:
-            self.cur.execute(
-                "INSERT INTO user_words (user_id, english_word, russian_translation) VALUES (%s, %s, %s)",
-                (user_id, en_word, ru_word)
-            )
-            self.conn.commit()
-            return True
-        except psycopg2.IntegrityError:
-            self.conn.rollback()
-            return False
+    def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> None:
+        """
+        Добавляет слово в базу данных.
+        :param user_id: ID пользователя
+        :param english_word: Слово на английском
+        :param russian_word: Слово на русском
+        """
+        query = """
+            INSERT INTO user_words (user_id, english_word, russian_translation)
+            VALUES (%s, LOWER(%s), LOWER(%s))
+        """
+        self.cur.execute(query, (user_id, english_word, russian_word))
+        self.conn.commit()
 
     def delete_user_word(self, user_id: int, en_word: str) -> bool:
         en_word = en_word.strip().lower()  # Приводим к нижнему регистру
@@ -164,3 +164,21 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка в mark_word_as_seen: {e}")
             self.conn.rollback()
+
+    def check_duplicate(self, english_word: str, russian_word: str) -> bool:
+        """
+        Проверяет, существует ли слово или перевод в словарях.
+        :param english_word: Слово на английском
+        :param russian_word: Слово на русском
+        :return: True, если дубликат найден, иначе False
+        """
+        query = """
+            SELECT 1
+            FROM common_words
+            WHERE (LOWER(english_word) = LOWER(%s) AND LOWER(russian_translation) = LOWER(%s))
+               OR (LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s))
+            LIMIT 1;
+        """
+        self.cur.execute(query, (english_word, russian_word, english_word, russian_word))
+        result = self.cur.fetchone()
+        return result is not None
