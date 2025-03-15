@@ -14,7 +14,6 @@ class Database:
             self.cur = self.conn.cursor()
             self.base_dir = Path(__file__).resolve().parent.parent
 
-            # Логирование начала выполнения скриптов
             logger.info("Создание таблиц...")
             self._create_tables()
             logger.info("Таблицы созданы.")
@@ -26,6 +25,7 @@ class Database:
             logger.info("Подключение к базе данных успешно установлено.")
         except Exception as e:
             logger.error(f"Ошибка при подключении к базе данных: {e}")
+            raise
 
     def _execute_sql_script(self, script_path: str):
         try:
@@ -70,9 +70,7 @@ class Database:
                 ORDER BY RANDOM()
                 LIMIT 1;
             """, (user_id,))
-            result = self.cur.fetchone()
-            logger.info(f"Случайное слово: {result}")
-            return result
+            return self.cur.fetchone()
         except Exception as e:
             logger.error(f"Ошибка в get_random_word: {e}")
             return None
@@ -87,30 +85,21 @@ class Database:
         return [row[0] for row in self.cur.fetchall()]
 
     def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> bool:
-        """
-        Возвращает True, если слово добавлено, False при дубликате.
-        """
+        """Добавляет слово, возвращает True при успешной вставке"""
         try:
-            query = """
+            self.cur.execute("""
                 INSERT INTO user_words (user_id, english_word, russian_translation)
                 VALUES (%s, LOWER(%s), LOWER(%s))
                 ON CONFLICT (user_id, english_word) DO NOTHING
-            """
-            self.cur.execute(query, (user_id, english_word, russian_word))
+            """, (user_id, english_word, russian_word))
             self.conn.commit()
             return self.cur.rowcount > 0
         except Exception as e:
             self.conn.rollback()
-            logger.error(f"Ошибка при добавлении слова: {e}")
+            logger.error(f"Ошибка добавления слова: {e}")
             return False
 
     def delete_user_word(self, user_id: int, word: str) -> bool:
-        """
-        Удаляет пользовательское слово по английскому или русскому слову.
-        :param user_id: ID пользователя
-        :param word: Слово для удаления (английское или русское)
-        :return: True, если слово успешно удалено, иначе False
-        """
         query = """
             DELETE FROM user_words
             WHERE user_id = %s AND (
@@ -136,8 +125,7 @@ class Database:
                 "SELECT english_word, russian_translation FROM user_words WHERE user_id = %s",
                 (user_id,)
             )
-            result = self.cur.fetchall()
-            return [(row[0], row[1]) for row in result]  # Явное указание типов данных
+            return [(row[0], row[1]) for row in self.cur.fetchall()]
         except Exception as e:
             logger.error(f"Ошибка в get_user_words: {e}")
             return []
@@ -156,11 +144,8 @@ class Database:
                 WHERE p.word_id IS NULL AND w.user_id = %s
                 LIMIT 1;
             """
-            logger.info(f"SQL Query: {query}")
             self.cur.execute(query, (user_id, user_id, user_id))
-            result = self.cur.fetchone()
-            logger.info(f"Query Result: {result}")
-            return result
+            return self.cur.fetchone()
         except Exception as e:
             logger.error(f"Ошибка в get_unseen_word: {e}")
             return None
@@ -178,20 +163,9 @@ class Database:
             self.conn.rollback()
 
     def check_duplicate(self, english_word: str, russian_word: str) -> bool:
-        """
-        Проверяет, существует ли слово или перевод в словарях.
-        :param english_word: Слово на английском
-        :param russian_word: Слово на русском
-        :return: True, если дубликат найден, иначе False
-        """
-        query = """
-            SELECT 1
-            FROM common_words
-            WHERE (LOWER(english_word) = LOWER(%s) AND LOWER(russian_translation) = LOWER(%s))
-               OR (LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s))
-            LIMIT 1;
-        """
-        self.cur.execute(query, (english_word, russian_word, english_word, russian_word))
-        result = self.cur.fetchone()
-        return result is not None
-
+        self.cur.execute("""
+            SELECT 1 FROM user_words 
+            WHERE english_word = LOWER(%s) OR russian_translation = LOWER(%s)
+            LIMIT 1
+        """, (english_word, russian_word))
+        return bool(self.cur.fetchone())
