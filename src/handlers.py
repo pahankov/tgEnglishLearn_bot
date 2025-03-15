@@ -37,10 +37,12 @@ def start_handler(update: Update, context: CallbackContext):
 
 
 def ask_question_handler(update: Update, context: CallbackContext):
+    """Генерация нового вопроса для пользователя."""
     user_id = update.effective_user.id
     question = quiz.get_next_question(user_id)
 
     if not question:
+        # Если вопросы закончились
         keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
         context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -49,49 +51,54 @@ def ask_question_handler(update: Update, context: CallbackContext):
         )
         return
 
-    word_en, word_ru, word_type, word_id = question
+    try:
+        # Распаковка данных вопроса
+        word_en, word_ru, word_type, word_id = question
+    except Exception as e:
+        logger.error(f"Ошибка распаковки данных вопроса: {e}")
+        return
 
-    # Получаем варианты в нижнем регистре и убираем дубликаты
+    # Получение неправильных вариантов (в нижнем регистре)
     wrong_answers = list({
         ans.lower()
         for ans in quiz.get_wrong_answers(word_ru)
         if ans.lower() != word_ru.lower()
-    })[:3]  # Берем первые 3 уникальных
+    })[:3]
 
-    # Формируем варианты с правильным регистром
+    # Формирование вариантов ответа
     options = [word_ru.capitalize()] + [ans.capitalize() for ans in wrong_answers]
     random.shuffle(options)
 
-    reply_markup = answer_keyboard(options)
-
+    # Сохранение контекста
     context.user_data["current_question"] = {
         "word_en": word_en,
-        "correct_answer": word_ru.capitalize(),  # Сохраняем с правильным регистром
+        "correct_answer": word_ru.capitalize(),
         "word_id": word_id,
         "word_type": word_type,
-        "options": options,
-        "reply_markup": reply_markup
+        "options": options
     }
 
+    # Отправка вопроса
     context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"Переведи слово: *{word_en}*",
+        text=f"Переведи слово: *{word_en.capitalize()}*",
         parse_mode="Markdown",
-        reply_markup=reply_markup
+        reply_markup=answer_keyboard(options)
     )
 
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     try:
-        db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
-        db.conn.commit()
-        update.callback_query.answer("Прогресс сброшен! Давайте начнем заново.")
+        # Явное управление транзакцией через контекстный менеджер
+        with db.conn:
+            with db.conn.cursor() as cur:
+                cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
+        update.callback_query.answer("✅ Прогресс сброшен! Начинаем заново.")
         ask_question_handler(update, context)
     except Exception as e:
         logger.error(f"Ошибка сброса прогресса: {e}")
-        db.conn.rollback()
-        update.callback_query.answer("Ошибка при сбросе.")
+        update.callback_query.answer("❌ Ошибка при сбросе.")
 
 
 def button_click_handler(update: Update, context: CallbackContext):
@@ -106,24 +113,28 @@ def button_click_handler(update: Update, context: CallbackContext):
         return
 
     user_answer = data[1]
-    correct_answer = context.user_data["current_question"]["correct_answer"]
-    word_id = context.user_data["current_question"]["word_id"]
-    word_type = context.user_data["current_question"]["word_type"]
+    current_question = context.user_data["current_question"]
+    correct_answer = current_question["correct_answer"]
+    word_id = current_question["word_id"]
+    word_type = current_question["word_type"]
+    user_id = update.effective_user.id
 
-    if user_answer == correct_answer:
-        quiz.mark_word_seen(query.from_user.id, word_id, word_type)
+    # Проверка регистра
+    if user_answer.lower() == correct_answer.lower():
+        # Проверка, не отмечено ли слово ранее
+        if not db.check_word_progress(user_id, word_id, word_type):
+            quiz.mark_word_seen(user_id, word_id, word_type)
         del context.user_data["current_question"]
         query.answer(quiz.get_correct_response())
         ask_question_handler(update, context)
     else:
-        options = context.user_data["current_question"]["options"]
+        options = current_question["options"]
         random.shuffle(options)
         try:
             query.edit_message_reply_markup(reply_markup=answer_keyboard(options))
         except Exception as e:
             logger.warning(f"Ошибка обновления клавиатуры: {e}")
         query.answer(quiz.get_incorrect_response())
-
 
 def save_word_handler(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id

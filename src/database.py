@@ -7,12 +7,16 @@ from src.config import DB_CONFIG
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class Database:
     def __init__(self):
         try:
             self.conn = psycopg2.connect(**DB_CONFIG)
             self.cur = self.conn.cursor()
-            self.base_dir = Path(__file__).resolve().parent.parent
+
+            # Исправление: Корректное определение пути
+            current_file = Path(__file__).resolve()
+            self.base_dir = current_file.parent.parent  # Путь к корню проекта
 
             logger.info("Создание таблиц...")
             self._create_tables()
@@ -22,7 +26,6 @@ class Database:
             self._seed_data()
             logger.info("Данные загружены.")
 
-            logger.info("Подключение к базе данных успешно установлено.")
         except Exception as e:
             logger.error(f"Ошибка при подключении к базе данных: {e}")
             raise
@@ -39,10 +42,12 @@ class Database:
             self.conn.rollback()
 
     def _create_tables(self):
-        self._execute_sql_script(str(self.base_dir / "scripts/create_tables.sql"))
+        script_path = self.base_dir / "scripts/create_tables.sql"
+        self._execute_sql_script(str(script_path))
 
     def _seed_data(self):
-        self._execute_sql_script(str(self.base_dir / "scripts/seed_data.sql"))
+        script_path = self.base_dir / "scripts/seed_data.sql"
+        self._execute_sql_script(str(script_path))
 
     def get_user(self, user_id: int) -> Optional[Tuple]:
         self.cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
@@ -52,8 +57,7 @@ class Database:
         try:
             self.cur.execute(
                 "INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s)",
-                (user_id, username, first_name)
-            )
+                (user_id, username, first_name))
             self.conn.commit()
         except psycopg2.IntegrityError:
             self.conn.rollback()
@@ -76,19 +80,17 @@ class Database:
             return None
 
     def get_wrong_translations(self, correct_word: str, limit: int = 3) -> List[str]:
-        """Возвращает уникальные варианты в нижнем регистре"""
         self.cur.execute("""
             SELECT LOWER(russian_translation) 
             FROM common_words 
             WHERE LOWER(russian_translation) != LOWER(%s)
-            GROUP BY LOWER(russian_translation)  -- Убираем дубли
+            GROUP BY LOWER(russian_translation)
             ORDER BY RANDOM()
             LIMIT %s;
         """, (correct_word.lower(), limit))
         return [row[0] for row in self.cur.fetchall()]
 
     def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> bool:
-        """Добавляет слово, возвращает True при успешной вставке"""
         try:
             self.cur.execute("""
                 INSERT INTO user_words (user_id, english_word, russian_translation)
@@ -118,55 +120,84 @@ class Database:
         self.cur.execute("SELECT COUNT(*) FROM user_words WHERE user_id = %s", (user_id,))
         return self.cur.fetchone()[0]
 
-    def close(self):
-        self.cur.close()
-        self.conn.close()
+    def check_word_progress(self, user_id: int, word_id: int, word_type: str) -> bool:
+        try:
+            self.cur.execute(
+                "SELECT 1 FROM user_progress WHERE user_id = %s AND word_id = %s AND word_type = %s",
+                (user_id, word_id, word_type))
+            return bool(self.cur.fetchone())
+        except Exception as e:
+            logger.error(f"Ошибка в check_word_progress: {e}")
+            return False
+
+    def mark_word_as_seen(self, user_id: int, word_id: int, word_type: str):
+        try:
+            with self.conn:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO user_progress (user_id, word_id, word_type) VALUES (%s, %s, %s)",
+                        (user_id, word_id, word_type)
+                    )
+        except Exception as e:
+            logger.error(f"Ошибка в mark_word_as_seen: {e}")
 
     def get_user_words(self, user_id: int) -> List[Tuple[str, str]]:
         try:
             self.cur.execute(
                 "SELECT english_word, russian_translation FROM user_words WHERE user_id = %s",
-                (user_id,)
-            )
+                (user_id,))
             return [(row[0], row[1]) for row in self.cur.fetchall()]
         except Exception as e:
             logger.error(f"Ошибка в get_user_words: {e}")
             return []
 
-    def get_unseen_word(self, user_id: int) -> Optional[Tuple[str, str]]:
+    def get_unseen_word(self, user_id: int) -> Optional[Tuple[str, str, str, int]]:
         try:
             query = """
-                SELECT w.english_word, w.russian_translation, 'common' AS word_type, w.word_id
-                FROM common_words w
-                LEFT JOIN user_progress p ON w.word_id = p.word_id AND p.word_type = 'common' AND p.user_id = %s
-                WHERE p.word_id IS NULL
-                UNION ALL
-                SELECT w.english_word, w.russian_translation, 'user' AS word_type, w.user_word_id
-                FROM user_words w
-                LEFT JOIN user_progress p ON w.user_word_id = p.word_id AND p.word_type = 'user' AND p.user_id = %s
-                WHERE p.word_id IS NULL AND w.user_id = %s
+                SELECT english_word, russian_translation, word_type, word_id FROM (
+                    -- Общие слова
+                    SELECT 
+                        c.english_word, 
+                        c.russian_translation, 
+                        'common' AS word_type, 
+                        c.word_id,
+                        RANDOM() AS sort_key
+                    FROM common_words c
+                    LEFT JOIN user_progress p 
+                        ON c.word_id = p.word_id 
+                        AND p.word_type = 'common' 
+                        AND p.user_id = %s
+                    WHERE p.word_id IS NULL
+
+                    UNION ALL
+
+                    -- Пользовательские слова
+                    SELECT 
+                        u.english_word, 
+                        u.russian_translation, 
+                        'user' AS word_type, 
+                        u.user_word_id,
+                        RANDOM() AS sort_key
+                    FROM user_words u
+                    LEFT JOIN user_progress p 
+                        ON u.user_word_id = p.word_id 
+                        AND p.word_type = 'user' 
+                        AND p.user_id = %s
+                    WHERE p.word_id IS NULL 
+                        AND u.user_id = %s
+                ) AS combined_data
+                ORDER BY sort_key
                 LIMIT 1;
             """
             self.cur.execute(query, (user_id, user_id, user_id))
-            return self.cur.fetchone()
+            result = self.cur.fetchone()
+            return result if result else None
         except Exception as e:
             logger.error(f"Ошибка в get_unseen_word: {e}")
             return None
 
-    def mark_word_as_seen(self, user_id: int, word_id: int, word_type: str):
-        try:
-            self.cur.execute("""
-                INSERT INTO user_progress (user_id, word_id, word_type)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id, word_id, word_type) DO NOTHING;
-            """, (user_id, word_id, word_type))
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"Ошибка в mark_word_as_seen: {e}")
-            self.conn.rollback()
-
     def check_duplicate(self, user_id: int, word: str) -> bool:
-        """Проверяет наличие слова в common_words и user_words"""
+        """Проверяет наличие слова в любом регистре"""
         self.cur.execute("""
             (SELECT 1 FROM common_words 
              WHERE LOWER(english_word) = LOWER(%s) OR LOWER(russian_translation) = LOWER(%s))
@@ -176,3 +207,7 @@ class Database:
             LIMIT 1
         """, (word, word, user_id, word, word))
         return bool(self.cur.fetchone())
+
+    def close(self):
+        self.cur.close()
+        self.conn.close()

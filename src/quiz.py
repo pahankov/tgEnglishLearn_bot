@@ -26,10 +26,14 @@ class QuizManager:
 
     def get_wrong_answers(self, correct_word: str, limit: int = 3) -> List[str]:
         """Возвращает уникальные варианты в нижнем регистре"""
-        return self.db.get_wrong_translations(correct_word.lower(), limit)
+        wrong = self.db.get_wrong_translations(correct_word.lower(), limit)
+        return [w.capitalize() for w in wrong]  # Приводим к единому формату
+
+
 
     def mark_word_seen(self, user_id: int, word_id: int, word_type: str):
-        self.db.mark_word_as_seen(user_id, word_id, word_type)
+            """Помечает слово как изученное в базе данных."""
+            self.db.mark_word_as_seen(user_id, word_id, word_type)
 
     def get_correct_response(self) -> str:
         resp = self.correct_responses[self.correct_index]
