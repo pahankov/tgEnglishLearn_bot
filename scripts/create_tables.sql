@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS user_words (
     id SERIAL PRIMARY KEY,
     user_id INT REFERENCES users(user_id),
     english_word VARCHAR(50),
-    russian_translation VARCHAR(50)
+    russian_translation VARCHAR(50),
+    UNIQUE (user_id, english_word)
 );
 
 CREATE TABLE IF NOT EXISTS user_progress (

@@ -190,7 +190,14 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
         return WAITING_WORD
 
     # Сохраняем слово в базу данных
-    db.add_user_word(user_id, first_translation, russian_word)
+    # Было:
+    # db.add_user_word(user_id, first_translation, russian_word)
+
+    # Стало:
+    success = db.add_user_word(user_id, first_translation, russian_word)
+    if not success:
+        update.message.reply_text("❌ Это слово уже есть в вашем словаре!")
+        return ConversationHandler.END
     logger.info(f"Слово '{first_translation}' успешно добавлено для пользователя {user_id} с переводом '{russian_word}'.")
     update.message.reply_text(f"✅ Слово '{russian_word}' добавлено с переводом '{first_translation}'!")
     return ConversationHandler.END

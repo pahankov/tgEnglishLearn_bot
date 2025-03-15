@@ -86,19 +86,23 @@ class Database:
         """, (correct_word, limit))
         return [row[0] for row in self.cur.fetchall()]
 
-    def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> None:
+    def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> bool:
         """
-        Добавляет слово в базу данных.
-        :param user_id: ID пользователя
-        :param english_word: Слово на английском
-        :param russian_word: Слово на русском
+        Возвращает True, если слово добавлено, False при дубликате.
         """
-        query = """
-            INSERT INTO user_words (user_id, english_word, russian_translation)
-            VALUES (%s, LOWER(%s), LOWER(%s))
-        """
-        self.cur.execute(query, (user_id, english_word, russian_word))
-        self.conn.commit()
+        try:
+            query = """
+                INSERT INTO user_words (user_id, english_word, russian_translation)
+                VALUES (%s, LOWER(%s), LOWER(%s))
+                ON CONFLICT (user_id, english_word) DO NOTHING
+            """
+            self.cur.execute(query, (user_id, english_word, russian_word))
+            self.conn.commit()
+            return self.cur.rowcount > 0
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Ошибка при добавлении слова: {e}")
+            return False
 
     def delete_user_word(self, user_id: int, word: str) -> bool:
         """

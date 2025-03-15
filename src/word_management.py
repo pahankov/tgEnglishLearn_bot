@@ -1,20 +1,18 @@
+from psycopg2 import IntegrityError
 from telegram import Update
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
-from src.keyboards import main_menu_keyboard  # Импортируем функцию для главного меню
-from dotenv import load_dotenv  # Для загрузки переменных окружения
+from src.keyboards import main_menu_keyboard
+from src.yandex_api import YandexDictionaryApi
+from dotenv import load_dotenv
 import os
-from src.yandex_api import YandexDictionaryApi  # Импортируем API-клиент
 import logging
 
-# Настройка логирования
-db = Database()
 logger = logging.getLogger(__name__)
 
-# Загрузка переменных окружения
+# Загрузка переменных окружения и инициализация
 load_dotenv()
-
-# Инициализация Yandex API
+db = Database()
 api_key = os.getenv("YANDEX_DICTIONARY_API_KEY")
 if not api_key:
     raise ValueError("Ошибка: токен Яндекс API не найден. Проверьте файл .env.")
@@ -38,76 +36,54 @@ def pluralize_words(count: int) -> str:
 
 def add_word(update: Update, context: CallbackContext) -> int:
     """
-    Начинает процесс добавления нового слова (в формате английское-русское).
+    Начинает процесс добавления нового слова.
     """
     update.message.reply_text(
-        "Введите слово например: яблоко",
+        "Введите слово, например: яблоко",
         reply_markup=main_menu_keyboard()
     )
     return WAITING_WORD
 
 
 def save_word(update: Update, context: CallbackContext) -> int:
-    """
-    Сохраняет русское слово, добавленное пользователем, и добавляет его перевод через Яндекс API.
-    """
+    logger.info("Начало функции save_word()")
     user_id = update.effective_user.id
-    ru_word = update.message.text.strip()
+    ru_word = update.message.text.strip().lower()
 
-    # Проверяем, что текст является валидным русским словом
     if not ru_word.isalpha():
-        update.message.reply_text(
-            "❌ Некорректное слово. Введите одно русское слово без пробелов и символов.",
-            reply_markup=main_menu_keyboard()
-        )
+        update.message.reply_text("❌ Некорректное слово. Используйте только буквы.")
         return WAITING_WORD
 
     try:
-        # Получаем перевод через Яндекс API
         en_translation = yandex_api.lookup(ru_word, "ru-en")
         if not en_translation:
-            update.message.reply_text(
-                f"❌ Перевод для слова '{ru_word}' не найден. Попробуйте другое слово.",
-                reply_markup=main_menu_keyboard()
-            )
+            update.message.reply_text("❌ Перевод не найден.")
             return WAITING_WORD
-
-        # Логируем успешный перевод
-        logger.info(f"Перевод для '{ru_word}': '{en_translation}'.")
     except Exception as e:
-        logger.error(f"Ошибка при обращении к Яндекс.Словарю для '{ru_word}': {e}")
-        update.message.reply_text(
-            "❌ Произошла ошибка при запросе. Попробуйте снова.",
-            reply_markup=main_menu_keyboard()
-        )
+        logger.error(f"Ошибка API: {e}")
+        update.message.reply_text("❌ Ошибка перевода.")
         return WAITING_WORD
 
-    # Добавляем слово в базу данных
+    en_translation_clean = en_translation.strip().lower()
+
     try:
-        success = db.add_user_word(user_id, en_translation, ru_word)
-        if success:
-            count = db.count_user_words(user_id)
-            word_form = pluralize_words(count)
-            update.message.reply_text(
-                f"✅ Слово '{ru_word}' добавлено с переводом '{en_translation}'.\n"
-                f"Теперь у вас {count} {word_form} в вашем словаре.",
-                reply_markup=main_menu_keyboard()
-            )
-            logger.info(f"Пользователь {user_id}: слово '{ru_word}' добавлено с переводом '{en_translation}'.")
-        else:
-            update.message.reply_text(
-                f"❌ Слово '{ru_word}' с переводом '{en_translation}' уже есть в вашем списке.",
-                reply_markup=main_menu_keyboard()
-            )
-            logger.warning(f"Пользователь {user_id} пытался добавить существующее слово: '{ru_word}' ({en_translation}).")
-    except Exception as e:
-        db.conn.rollback()
-        logger.error(f"Ошибка при добавлении слова '{ru_word}': {e}")
+        success = db.add_user_word(user_id, en_translation_clean, ru_word)
+        if not success:
+            update.message.reply_text(f"⚠️ Слово '{en_translation_clean}' уже существует!")
+            return ConversationHandler.END
+
+        count = db.count_user_words(user_id)
         update.message.reply_text(
-            "❌ Произошла ошибка при добавлении слова. Попробуйте снова.",
+            f"✅ Добавлено: {ru_word} → {en_translation_clean}\n"
+            f"Всего слов: {count}",
             reply_markup=main_menu_keyboard()
         )
-    return WAITING_WORD
+
+    except Exception as e:
+        logger.error(f"Database error: {e}")
+        update.message.reply_text("❌ Ошибка базы данных.")
+
+    return ConversationHandler.END
 
 
 def delete_word(update: Update, context: CallbackContext) -> int:
@@ -171,7 +147,6 @@ def show_user_words(update: Update, context: CallbackContext):
             formatted_words = [
                 f"• {en.capitalize()} — {ru.capitalize()}" for en, ru in words
             ]
-
             count = len(words)
             word_form = pluralize_words(count)
             text = f"📖 Ваши слова ({count} {word_form}):\n" + "\n".join(formatted_words)
