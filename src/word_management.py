@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
-from src.keyboards import main_menu_keyboard, add_more_keyboard
+from src.keyboards import main_menu_keyboard, add_more_keyboard, delete_more_keyboard
 from src.yandex_api import YandexDictionaryApi
 import os
 import logging
@@ -9,24 +9,31 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Инициализация базы и API
+# Инициализация компонентов
 db = Database()
 api_key = os.getenv("YANDEX_DICTIONARY_API_KEY")
 yandex_api = YandexDictionaryApi(api_key=api_key) if api_key else None
 
 # Состояния ConversationHandler
-WAITING_WORD, WAITING_DELETE, WAITING_CHOICE = range(3)
+(
+    WAITING_WORD,  # Ожидание ввода слова
+    WAITING_DELETE,  # Ожидание слова для удаления
+    WAITING_CHOICE,  # Выбор после добавления
+    WAITING_DELETE_CHOICE  # Выбор после удаления
+) = range(4)
 
 
 def pluralize_words(count: int) -> str:
-    """Склонение слова 'слово'"""
-    if count % 10 == 1 and count % 100 != 11:
+    """Склонение слова 'слово' по числам"""
+    last_digit = count % 10
+    if last_digit == 1 and count % 100 != 11:
         return "слово"
-    elif 2 <= count % 10 <= 4 and (count % 100 < 10 or count % 100 >= 20):
+    elif 2 <= last_digit <= 4 and (count % 100 < 10 or count % 100 >= 20):
         return "слова"
     return "слов"
 
 
+# ================== Добавление слов ==================
 def add_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления слова"""
     update.message.reply_text(
@@ -56,7 +63,7 @@ def save_word(update: Update, context: CallbackContext) -> int:
         )
         return WAITING_WORD
 
-    # Проверка существования в базе
+    # Проверка дубликатов
     if db.check_duplicate(user_id, input_text):
         update.message.reply_text(
             f"❌ Слово '{input_text}' уже существует!",
@@ -127,35 +134,61 @@ def handle_choice(update: Update, context: CallbackContext) -> int:
         return WAITING_CHOICE
 
 
+# ================== Удаление слов ==================
 def delete_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса удаления"""
     update.message.reply_text(
-        "🗑 Введите слово для удаления:",
+        "🗑 Введите слово для удаления (русское или английское):",
         reply_markup=main_menu_keyboard()
     )
     return WAITING_DELETE
 
 
 def confirm_delete(update: Update, context: CallbackContext) -> int:
-    """Подтверждение удаления"""
+    """Обработка удаления и предложение продолжить"""
     user_id = update.effective_user.id
     word = update.message.text.strip().lower()
 
     if db.delete_user_word(user_id, word):
         update.message.reply_text(
-            f"✅ Слово '{word}' успешно удалено!",
-            reply_markup=main_menu_keyboard()
+            f"✅ Слово/перевод '{word}' успешно удалено!",
+            reply_markup=delete_more_keyboard()
         )
+        return WAITING_DELETE_CHOICE
     else:
         update.message.reply_text(
-            f"❌ Слово '{word}' не найдено!",
+            f"❌ Слово '{word}' не найдено в вашем словаре!",
             reply_markup=main_menu_keyboard()
         )
-    return ConversationHandler.END
+        return ConversationHandler.END
 
 
+def handle_delete_choice(update: Update, context: CallbackContext) -> int:
+    """Обработка выбора после удаления"""
+    choice = update.message.text
+    if choice == "Удалить ещё ➖":
+        update.message.reply_text(
+            "🗑 Введите следующее слово для удаления:",
+            reply_markup=main_menu_keyboard()
+        )
+        return WAITING_DELETE
+    elif choice == "В меню ↩️":
+        update.message.reply_text(
+            "🏠 Возвращаемся в главное меню:",
+            reply_markup=main_menu_keyboard()
+        )
+        return ConversationHandler.END
+    else:
+        update.message.reply_text(
+            "❌ Используйте кнопки для выбора!",
+            reply_markup=delete_more_keyboard()
+        )
+        return WAITING_DELETE_CHOICE
+
+
+# ================== Показ слов ==================
 def show_user_words(update: Update, context: CallbackContext):
-    """Показ списка слов"""
+    """Отображение списка пользовательских слов"""
     user_id = update.effective_user.id
     try:
         words = db.get_user_words(user_id)
