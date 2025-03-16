@@ -226,7 +226,7 @@ def _save_session_data(user_id, context):
         return
 
     session_end = datetime.now()
-    duration = (session_end - session_start).seconds // 60
+    duration = round((session_end - session_start).total_seconds() / 60, 1)
 
     # Добавляем буфер для корректного учёта времени
     session_end_with_buffer = session_end + timedelta(seconds=1)
