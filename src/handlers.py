@@ -86,19 +86,16 @@ def ask_question_handler(update: Update, context: CallbackContext):
         reply_markup=answer_keyboard(options)
     )
 
-
 def reset_progress_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     try:
-        # Явное управление транзакцией через контекстный менеджер
         with db.conn:
-            with db.conn.cursor() as cur:
-                cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
-        update.callback_query.answer("✅ Прогресс сброшен! Начинаем заново.")
+            db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
+        update.callback_query.answer("✅ Прогресс сброшен!")
         ask_question_handler(update, context)
     except Exception as e:
-        logger.error(f"Ошибка сброса прогресса: {e}")
-        update.callback_query.answer("❌ Ошибка при сбросе.")
+        logger.error(f"Ошибка сброса: {e}")
+        update.callback_query.answer("❌ Ошибка!")
 
 
 def button_click_handler(update: Update, context: CallbackContext):

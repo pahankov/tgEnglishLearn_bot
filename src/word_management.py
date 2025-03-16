@@ -58,14 +58,17 @@ def save_word(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("❌ Введите только ОДНО слово!", reply_markup=main_menu_keyboard())
         return WAITING_WORD
 
-    # Проверка на русские символы
+    # Проверка на русские символы и дефис
     if not re.match(r'^[а-яё\-]+$', input_text):
         update.message.reply_text("❌ Используйте только русские буквы и дефис!", reply_markup=main_menu_keyboard())
         return WAITING_WORD
 
-    # Проверка дубликатов
+    # Проверка дубликатов слова (регистронезависимо)
     if db.check_duplicate(user_id, input_text):
-        update.message.reply_text(f"❌ Слово '{input_text}' уже существует!", reply_markup=main_menu_keyboard())
+        update.message.reply_text(
+            f"❌ Слово '{input_text.capitalize()}' уже существует!",
+            reply_markup=main_menu_keyboard()
+        )
         return WAITING_WORD
 
     # Получение перевода через API
@@ -74,18 +77,22 @@ def save_word(update: Update, context: CallbackContext) -> int:
         if not api_response or not api_response.get('def'):
             raise ValueError("Пустой ответ API")
 
-        first_translation = api_response['def'][0]['tr'][0]['text'].lower()  # Перевод в нижний регистр
+        # Извлекаем первый перевод и нормализуем регистр
+        first_translation = api_response['def'][0]['tr'][0]['text'].lower()
     except Exception as e:
         logger.error(f"Ошибка перевода: {str(e)}")
         update.message.reply_text("❌ Не удалось получить перевод!", reply_markup=main_menu_keyboard())
         return WAITING_WORD
 
-    # Проверка дубликата перевода
+    # Проверка дубликата перевода (регистронезависимо)
     if db.check_duplicate(user_id, first_translation):
-        update.message.reply_text(f"❌ Перевод '{first_translation}' уже существует!", reply_markup=main_menu_keyboard())
+        update.message.reply_text(
+            f"❌ Перевод '{first_translation.capitalize()}' уже существует!",
+            reply_markup=main_menu_keyboard()
+        )
         return WAITING_WORD
 
-    # Сохранение слова
+    # Сохранение слова и перевода (в нижнем регистре)
     if db.add_user_word(user_id, first_translation, input_text):
         count = db.count_user_words(user_id)
         update.message.reply_text(
