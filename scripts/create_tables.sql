@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS user_progress (
     user_id INT REFERENCES users(user_id),
     word_id INT,
     word_type VARCHAR(50),
+    added_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(user_id, word_id, word_type)
 );
 

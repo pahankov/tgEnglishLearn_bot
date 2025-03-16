@@ -13,7 +13,7 @@ from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
 from datetime import datetime
 from src.quiz import check_session_timeout
-
+from datetime import datetime, timedelta
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -44,50 +44,47 @@ def ask_question_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     question = quiz.get_next_question(user_id)
 
-    # Инициализация данных сессии
-    context.user_data.update({
-        'session_start': datetime.now(),  # Время начала
-        'correct_answers': 0,  # Счётчик правильных ответов
-        'active_session': True  # Флаг активности
-    })
-
-    # Запуск таймера неактивности (15 минут)
-    context.job_queue.run_once(
-        callback=check_session_timeout,
-        when=900,
-        context={'user_id': user_id},  # Передаём user_id через context
-        name=str(user_id)
-    )
-
-
+    # Инициализация сессии только при первом вызове
+    if 'session_start' not in context.user_data:
+        context.user_data.update({
+            'session_start': datetime.now(),  # Время начала
+            'correct_answers': 0,             # Счётчик правильных ответов
+            'active_session': True            # Флаг активности
+        })
+        # Запуск таймера неактивности (15 минут)
+        context.job_queue.run_once(
+            callback=check_session_timeout,
+            when=900,
+            context={'user_id': user_id},
+            name=str(user_id)
+        )
 
     if not question:
-        # Если вопросы закончились
-        _save_session_data(user_id, context)
-        context.user_data.clear()
-        keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
-        context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="🎉 Вы изучили все слова! Отличная работа!",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        # Если вопросы закончились и сессия активна
+        if context.user_data.get('active_session'):
+            _save_session_data(user_id, context)
+            context.user_data.clear()
+            keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🎉 Вы изучили все слова! Отличная работа!",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         return
 
     try:
-        # Распаковка данных вопроса
         word_en, word_ru, word_type, word_id = question
     except Exception as e:
         logger.error(f"Ошибка распаковки данных вопроса: {e}")
         return
 
-    # Получение неправильных вариантов (в нижнем регистре)
+    # Формирование вариантов ответа
     wrong_answers = list({
         ans.lower()
         for ans in quiz.get_wrong_answers(word_ru)
         if ans.lower() != word_ru.lower()
     })[:3]
 
-    # Формирование вариантов ответа
     options = [word_ru.capitalize()] + [ans.capitalize() for ans in wrong_answers]
     random.shuffle(options)
 
@@ -107,6 +104,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)
     )
+
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -140,9 +138,11 @@ def button_click_handler(update: Update, context: CallbackContext):
 
     # Проверка регистра
     if user_answer.lower() == correct_answer.lower():
-        # Проверка, не отмечено ли слово ранее
         if not db.check_word_progress(user_id, word_id, word_type):
-            quiz.mark_word_seen(user_id, word_id, word_type)
+            # Передаём session_start из контекста
+            session_start = context.user_data.get("session_start")
+            logger.info(f"[DEBUG] session_start в button_click: {session_start}")  # Логирование
+            quiz.mark_word_seen(user_id, word_id, word_type, session_start)
         del context.user_data["current_question"]
         query.answer(quiz.get_correct_response())
         ask_question_handler(update, context)
@@ -218,10 +218,23 @@ def end_session(update: Update, context: CallbackContext):
         context.user_data.clear()
     update.message.reply_text("Сессия завершена", reply_markup=main_menu_keyboard())
 
+
 def _save_session_data(user_id, context):
-    duration = (datetime.now() - context.user_data['session_start']).seconds // 60
+    session_start = context.user_data.get('session_start')
+    if not session_start:
+        logger.error("Время начала сессии не найдено!")
+        return
+
+    session_end = datetime.now()
+    duration = (session_end - session_start).seconds // 60
+
+    # Добавляем буфер для корректного учёта времени
+    session_end_with_buffer = session_end + timedelta(seconds=1)
+    learned_words = db.count_new_learned_words(user_id, session_start, session_end_with_buffer)
+
     db.update_session_stats(
         user_id=user_id,
-        learned_words=context.user_data['correct_answers'],
+        learned_words=learned_words,
         session_duration=duration
     )
+    logger.info(f"[DEBUG] Сессия сохранена: learned_words={learned_words}, duration={duration}")

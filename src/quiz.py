@@ -1,8 +1,12 @@
+from datetime import datetime
 from typing import List  # Добавляем необходимый импорт
 from src.database import Database
 from telegram.ext import CallbackContext
 from src.keyboards import main_menu_keyboard
+import logging
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class QuizManager:
     def __init__(self, db: Database):
@@ -25,18 +29,19 @@ class QuizManager:
         self.incorrect_index = 0
 
     def get_next_question(self, user_id: int) -> tuple:
-        return self.db.get_unseen_word(user_id)
+        question = self.db.get_unseen_word(user_id)
+        if not question:
+            logger.error(f"[DEBUG] Нет доступных слов для user_id={user_id}")
+        return question
 
     def get_wrong_answers(self, correct_word: str, limit: int = 3) -> List[str]:
         """Возвращает уникальные варианты в нижнем регистре"""
         wrong = self.db.get_wrong_translations(correct_word.lower(), limit)
         return [w.capitalize() for w in wrong]  # Приводим к единому формату
 
-
-
-    def mark_word_seen(self, user_id: int, word_id: int, word_type: str):
-            """Помечает слово как изученное в базе данных."""
-            self.db.mark_word_as_seen(user_id, word_id, word_type)
+    def mark_word_seen(self, user_id: int, word_id: int, word_type: str, session_start: datetime):
+        """Помечает слово как изученное в базе данных."""
+        self.db.mark_word_as_seen(user_id, word_id, word_type, session_start)
 
     def get_correct_response(self) -> str:
         resp = self.correct_responses[self.correct_index]

@@ -14,39 +14,28 @@ db = Database()
 
 
 def get_user_statistics(user_id: int) -> dict:
-    """
-    Собирает расширенную статистику по пользователю:
-      - learned_words: количество изученных слов (из таблицы user_progress);
-      - added_words: количество слов, добавленных пользователем (из таблицы user_words);
-      - session_stats: статистика сессий (из таблицы session_stats), возвращается как список кортежей (session_date, learned_words).
-
-    Если таблицы или столбцы не существуют, возвращает пустой список сессий.
-    """
     stats = {}
     try:
+        # Запрос для learned_words
         db.cur.execute("SELECT COUNT(*) FROM user_progress WHERE user_id = %s", (user_id,))
-        stats['learned_words'] = db.cur.fetchone()[0]
-    except Exception as e:
-        logger.error(f"Ошибка получения изученных слов для user_id {user_id}: {e}")
-        stats['learned_words'] = 0
+        learned = db.cur.fetchone()[0]
+        stats['learned_words'] = learned
+        logger.info(f"[DEBUG] Всего изучено слов: {learned}")  # Логирование
 
-    try:
+        # Запрос для added_words
         db.cur.execute("SELECT COUNT(*) FROM user_words WHERE user_id = %s", (user_id,))
-        stats['added_words'] = db.cur.fetchone()[0]
-    except Exception as e:
-        logger.error(f"Ошибка получения добавленных слов для user_id {user_id}: {e}")
-        stats['added_words'] = 0
+        added = db.cur.fetchone()[0]
+        stats['added_words'] = added
+        logger.info(f"[DEBUG] Всего добавлено слов: {added}")
 
-    try:
-        # Этот запрос рассчитан на существование таблицы session_stats с нужными столбцами.
-        db.cur.execute(
-            "SELECT session_date, learned_words FROM session_stats WHERE user_id = %s ORDER BY session_date",
-            (user_id,)
-        )
-        stats['session_stats'] = db.cur.fetchall()  # Ожидается список кортежей (session_date, learned_words)
+        # Запрос для session_stats
+        db.cur.execute("SELECT session_date, learned_words FROM session_stats WHERE user_id = %s", (user_id,))
+        sessions = db.cur.fetchall()
+        stats['session_stats'] = sessions
+        logger.info(f"[DEBUG] Данные сессий: {sessions}")
+
     except Exception as e:
-        logger.error(f"Ошибка получения статистики сессий для user_id {user_id}: {e}")
-        stats['session_stats'] = []
+        logger.error(f"Ошибка получения статистики: {e}")
 
     return stats
 

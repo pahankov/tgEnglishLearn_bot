@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import psycopg2
 import logging
 from pathlib import Path
@@ -94,6 +96,7 @@ class Database:
             """, (user_id, english_word, russian_word))
 
             self.conn.commit()
+            logger.info("[DEBUG] Слово добавлено в user_words")
             return self.cur.rowcount > 0
         except Exception as e:
             self.conn.rollback()
@@ -117,29 +120,34 @@ class Database:
         return self.cur.fetchone()[0]
 
     def check_word_progress(self, user_id: int, word_id: int, word_type: str) -> bool:
-        """Проверяет, изучено ли слово."""
         try:
             self.cur.execute(
                 "SELECT 1 FROM user_progress WHERE user_id = %s AND word_id = %s AND word_type = %s",
                 (user_id, word_id, word_type)
             )
-            return bool(self.cur.fetchone())
+            result = bool(self.cur.fetchone())
+            logger.info(f"[DEBUG] check_word_progress: user_id={user_id}, word_id={word_id}, exists={result}")
+            return result
         except Exception as e:
             logger.error(f"Ошибка в check_word_progress: {e}")
             return False
 
-    def mark_word_as_seen(self, user_id: int, word_id: int, word_type: str):
-        """Добавляет слово в прогресс."""
+    # В database.py, метод mark_word_as_seen
+    # В database.py
+    def mark_word_as_seen(self, user_id: int, word_id: int, word_type: str, session_start: datetime):
         try:
             self.cur.execute(
-                "INSERT INTO user_progress (user_id, word_id, word_type) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                (user_id, word_id, word_type)
+                "INSERT INTO user_progress (user_id, word_id, word_type, added_at) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (user_id, word_id, word_type, session_start)
             )
             self.conn.commit()
-            logger.info(f"[DEBUG] Слово добавлено в прогресс: user_id={user_id}, word_id={word_id}")
+            logger.info(
+                f"[DEBUG] Добавлено слово: user_id={user_id}, word_id={word_id}, "
+                f"added_at={session_start}"
+            )
         except Exception as e:
             logger.error(f"Ошибка в mark_word_as_seen: {e}")
-            self.conn.rollback()
 
     def get_user_words(self, user_id: int) -> List[Tuple[str, str]]:
         try:
@@ -224,8 +232,30 @@ class Database:
                 VALUES (%s, NOW(), %s, %s)
             """, (user_id, learned_words, session_duration))
             self.conn.commit()
+            logger.info(
+                f"[DEBUG] Сессия сохранена: user_id={user_id}, "
+                f"learned_words={learned_words}, duration={session_duration}"
+            )
         except Exception as e:
             logger.error(f"Ошибка сохранения сессии: {e}")
+
+    def count_new_learned_words(self, user_id: int, session_start: datetime, session_end: datetime) -> int:
+        try:
+            # Убедимся, что session_start <= session_end
+            if session_start > session_end:
+                session_start, session_end = session_end, session_start
+
+            self.cur.execute(
+                "SELECT COUNT(*) FROM user_progress "
+                "WHERE user_id = %s AND added_at BETWEEN %s AND %s",
+                (user_id, session_start, session_end)
+            )
+            count = self.cur.fetchone()[0] or 0
+            logger.info(f"[DEBUG] Новых слов за сессию: {count}. Диапазон: {session_start} — {session_end}")
+            return count
+        except Exception as e:
+            logger.error(f"Ошибка в count_new_learned_words: {e}")
+            return 0
 
     def close(self):
         self.cur.close()
