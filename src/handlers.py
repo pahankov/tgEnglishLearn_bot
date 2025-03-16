@@ -11,6 +11,9 @@ from src.word_management import add_word, save_word, delete_word, confirm_delete
     WAITING_DELETE
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
+from datetime import datetime
+from src.quiz import check_session_timeout
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -41,8 +44,27 @@ def ask_question_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     question = quiz.get_next_question(user_id)
 
+    # Инициализация данных сессии
+    context.user_data.update({
+        'session_start': datetime.now(),  # Время начала
+        'correct_answers': 0,  # Счётчик правильных ответов
+        'active_session': True  # Флаг активности
+    })
+
+    # Запуск таймера неактивности (15 минут)
+    context.job_queue.run_once(
+        callback=check_session_timeout,
+        when=900,
+        context={'user_id': user_id},  # Передаём user_id через context
+        name=str(user_id)
+    )
+
+
+
     if not question:
         # Если вопросы закончились
+        _save_session_data(user_id, context)
+        context.user_data.clear()
         keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
         context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -187,3 +209,19 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("❌ Не удалось добавить слово.", reply_markup=main_menu_keyboard())
 
     return ConversationHandler.END
+
+# handlers.py
+def end_session(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if 'active_session' in context.user_data:
+        _save_session_data(user_id, context)
+        context.user_data.clear()
+    update.message.reply_text("Сессия завершена", reply_markup=main_menu_keyboard())
+
+def _save_session_data(user_id, context):
+    duration = (datetime.now() - context.user_data['session_start']).seconds // 60
+    db.update_session_stats(
+        user_id=user_id,
+        learned_words=context.user_data['correct_answers'],
+        session_duration=duration
+    )

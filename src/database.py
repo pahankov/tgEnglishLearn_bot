@@ -83,12 +83,16 @@ class Database:
         return [row[0] for row in self.cur.fetchall()]
 
     def add_user_word(self, user_id: int, english_word: str, russian_word: str) -> bool:
+        english_word = english_word.lower()
+        russian_word = russian_word.lower()
         try:
+
             self.cur.execute("""
                 INSERT INTO user_words (user_id, english_word, russian_translation)
-                VALUES (%s, LOWER(%s), LOWER(%s))
-                ON CONFLICT (user_id, LOWER(english_word)) DO NOTHING
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, english_word) DO NOTHING
             """, (user_id, english_word, russian_word))
+
             self.conn.commit()
             return self.cur.rowcount > 0
         except Exception as e:
@@ -211,6 +215,17 @@ class Database:
         progress = self.cur.fetchall()
         logger.info(f"[DEBUG] Прогресс для user_id={user_id}: {progress}")
         return progress
+
+    def update_session_stats(self, user_id: int, learned_words: int, session_duration: int):
+        try:
+            self.cur.execute("""
+                INSERT INTO session_stats 
+                (user_id, session_date, learned_words, session_duration)
+                VALUES (%s, NOW(), %s, %s)
+            """, (user_id, learned_words, session_duration))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Ошибка сохранения сессии: {e}")
 
     def close(self):
         self.cur.close()

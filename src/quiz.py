@@ -1,5 +1,8 @@
 from typing import List  # Добавляем необходимый импорт
 from src.database import Database
+from telegram.ext import CallbackContext
+from src.keyboards import main_menu_keyboard
+
 
 class QuizManager:
     def __init__(self, db: Database):
@@ -44,3 +47,17 @@ class QuizManager:
         resp = self.incorrect_responses[self.incorrect_index]
         self.incorrect_index = (self.incorrect_index + 1) % len(self.incorrect_responses)
         return resp
+
+# quiz.py
+def check_session_timeout(context: CallbackContext):
+    from src.handlers import _save_session_data
+    job = context.job
+    user_id = job.user_id
+    if 'active_session' in context.user_data:
+        _save_session_data(user_id, context)
+        context.bot.send_message(
+            chat_id=user_id,
+            text="Сессия завершена из-за неактивности",
+            reply_markup=main_menu_keyboard()
+        )
+        context.user_data.clear()

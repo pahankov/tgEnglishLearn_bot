@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS user_progress (
 CREATE TABLE IF NOT EXISTS session_stats (
     id SERIAL PRIMARY KEY,
     user_id INT REFERENCES users(user_id),
-    session_date TIMESTAMP,
-    learned_words INT
+    session_date TIMESTAMP NOT NULL,
+    learned_words INT NOT NULL,
+    session_duration INT NOT NULL
 );

@@ -51,32 +51,22 @@ def get_user_statistics(user_id: int) -> dict:
     return stats
 
 
+# stats.py
 def generate_stats_chart(session_stats):
-    """
-    Генерирует график динамики обучения на основе статистики сессий.
-    Принимает session_stats — список кортежей (session_date, learned_words).
-    Возвращает байтовый поток (BytesIO) с PNG-изображением графика.
-    Если нет данных, возвращает None.
-    """
-    if not session_stats:
-        return None
-
-    # Выделяем список дат и изученных слов
-    dates = [s[0] for s in session_stats]
+    dates = [s[0].strftime("%Y-%m-%d %H:%M") for s in session_stats]
     words = [s[1] for s in session_stats]
 
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(10, 5))
     plt.plot(dates, words, marker='o', linestyle='-', color='blue')
-    plt.xlabel("Дата сессии")
+    plt.title("Прогресс по сессиям")
+    plt.xlabel("Дата")
     plt.ylabel("Изучено слов")
-    plt.title("Динамика обучения")
-    plt.grid(True)
+    plt.xticks(rotation=45)
     plt.tight_layout()
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
     buf.seek(0)
-    plt.close()
     return buf
 
 
