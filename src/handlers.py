@@ -46,36 +46,50 @@ def ask_question_handler(update: Update, context: CallbackContext):
     if 'active_session' not in context.user_data or not context.user_data['active_session']:
         update.effective_message.reply_text(
             "Сессия началась!",
-            reply_markup=session_keyboard()  # Кнопка "В меню ↩️"
+            reply_markup=session_keyboard()
         )
 
-        # Инициализируем данные сессии только при первом вызове
+        # Инициализируем данные сессии
+        session_start = datetime.now()
         context.user_data.update({
-            'session_start': datetime.now(),
+            'session_start': session_start,
             'correct_answers': 0,
             'active_session': True,
-            'job': None  # Для управления таймером
+            'job': None
         })
 
-        # Запускаем таймер неактивности (15 минут)
+        # Запускаем таймер с передачей session_start в контекст
         job = context.job_queue.run_once(
             callback=check_session_timeout,
-            when=900,  # 900 секунд = 15 минут
-            context={'user_id': user_id},
+            when=60,
+            context={
+                'user_id': user_id,
+                'session_start': session_start.timestamp()  # Сохраняем как timestamp
+            },
             name=str(user_id)
         )
-        context.user_data['job'] = job  # Сохраняем задачу для сброса таймера
+        context.user_data['job'] = job
 
-    # Если пользователь активен, обновляем таймер
-    if context.user_data.get('job'):
-        context.user_data['job'].schedule_removal()  # Удаляем старый таймер
-        new_job = context.job_queue.run_once(
-            callback=check_session_timeout,
-            when=900,  # 15 минут
-            context={'user_id': user_id},
-            name=str(user_id)
-        )
-        context.user_data['job'] = new_job  # Обновляем таймер
+    # Обновляем таймер
+    if 'job' in context.user_data:
+        try:
+            context.user_data['job'].schedule_removal()
+        except Exception as e:
+            logger.error(f"Ошибка удаления задачи: {e}")
+
+    # Создаем новый таймер с актуальным session_start
+    new_job = context.job_queue.run_once(
+        callback=check_session_timeout,
+        when=60,
+        context={
+            'user_id': user_id,
+            'session_start': context.user_data['session_start'].timestamp()
+        },
+        name=str(user_id)
+    )
+    context.user_data['job'] = new_job
+
+    # ... остальная логика ...
 
     # Получение следующего вопроса
     question = quiz.get_next_question(user_id)

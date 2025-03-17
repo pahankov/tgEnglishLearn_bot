@@ -16,7 +16,7 @@ def save_session_data(user_id, context):
         return
 
     session_end = datetime.now()
-    duration = round((session_end - session_start).total_seconds() / 60, 1)
+    duration = int((session_end - session_start).total_seconds())
     session_end_with_buffer = session_end + timedelta(seconds=1)
 
     learned_words = db.count_new_learned_words(user_id, session_start, session_end_with_buffer)
@@ -26,17 +26,51 @@ def save_session_data(user_id, context):
         session_duration=duration
     )
     logger.info(f"[DEBUG] Сессия сохранена: learned_words={learned_words}, duration={duration}")
+    logger.info(f"[DEBUG] Время сессии: start={session_start}, end={session_end}, duration={duration} сек")
+    logger.info(f"[DEBUG] Найдено новых слов: {learned_words}")
+
 
 def check_session_timeout(context: CallbackContext):
-    user_id = context.job.context['user_id']
-    if 'active_session' in context.user_data:
-        save_session_data(user_id, context)
-        context.bot.send_message(
-            user_id,
-            "⏳ Сессия завершена из-за неактивности",
-            reply_markup=main_menu_keyboard()  # Восстанавливаем меню
+    job = context.job
+    if not job:
+        logger.error("Задача не найдена")
+        return
+
+    # Получаем данные из контекста задачи
+    user_id = job.context.get('user_id')
+    session_start_ts = job.context.get('session_start')
+
+    if not user_id or not session_start_ts:
+        logger.error("Недостаточно данных в контексте задачи")
+        return
+
+    # Конвертируем timestamp обратно в datetime
+    session_start = datetime.fromtimestamp(session_start_ts)
+    session_end = datetime.now()
+    duration = int((session_end - session_start).total_seconds())
+
+    # Сохраняем сессию через прямой запрос к БД
+    try:
+        learned_words = db.count_new_learned_words(
+            user_id=user_id,
+            session_start=session_start,
+            session_end=session_end
         )
-        context.user_data.clear()
+        db.update_session_stats(
+            user_id=user_id,
+            learned_words=learned_words,
+            session_duration=duration
+        )
+        logger.info(f"[DEBUG] Сессия сохранена: user_id={user_id}, words={learned_words}, duration={duration} сек")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения сессии: {e}")
+
+    # Отправляем уведомление
+    context.bot.send_message(
+        chat_id=user_id,
+        text="⏳ Сессия завершена из-за неактивности",
+        reply_markup=main_menu_keyboard()
+    )
 
 def end_session(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
