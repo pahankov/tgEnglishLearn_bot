@@ -82,7 +82,7 @@ def save_word(update: Update, context: CallbackContext) -> int:
     if db.add_user_word(user_id, first_translation, input_text):
         count = db.count_user_words(user_id)
         update.message.reply_text(
-            f"✅ Успешно добавлено: {input_text.capitalize()} → {first_translation.capitalize()}\n"
+            f"✅ Успешно добавлено: {input_text.capitalize()} по слову {first_translation.capitalize()}\n"
             f"📚 Всего слов добавлено: {count}",
             reply_markup=add_more_keyboard()
         )

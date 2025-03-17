@@ -30,7 +30,7 @@ from src.word_management import (
     WAITING_CHOICE,
     WAITING_DELETE_CHOICE
 )
-from src.stats import stats_handler
+from src.stats import stats_handler, clear_user_sessions
 
 # ================== Настройка окружения ==================
 load_dotenv()
@@ -105,6 +105,7 @@ def init_conversation_handler(dispatcher):
 
     # Обработчик для выхода в главное меню
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), end_session))
+    dispatcher.add_handler(MessageHandler(Filters.regex(r"^Очистить 🗑$"), clear_user_sessions))
 
 
 def cancel_action(update, context):
@@ -119,6 +120,7 @@ def cancel_action(update, context):
 def handle_errors(update, context):
     """Обработка ошибок"""
     logger.error(f"Ошибка: {context.error}")
+
 
 
 if __name__ == "__main__":
