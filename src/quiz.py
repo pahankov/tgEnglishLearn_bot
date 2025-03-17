@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import List  # Добавляем необходимый импорт
 from src.database import Database
 from telegram.ext import CallbackContext
+from src.session_manager import save_session_data
+
 from src.keyboards import main_menu_keyboard
 import logging
 
@@ -55,14 +57,12 @@ class QuizManager:
 
 # quiz.py
 def check_session_timeout(context: CallbackContext):
-    from src.handlers import _save_session_data
-    job = context.job
-    user_id = job.user_id
+    user_id = context.job.context['user_id']
     if 'active_session' in context.user_data:
         _save_session_data(user_id, context)
         context.bot.send_message(
-            chat_id=user_id,
-            text="Сессия завершена из-за неактивности",
-            reply_markup=main_menu_keyboard()
+            user_id,
+            "⏳ Сессия завершена из-за неактивности",
+            reply_markup=main_menu_keyboard()  # Восстанавливаем меню
         )
         context.user_data.clear()

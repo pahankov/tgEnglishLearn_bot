@@ -2,18 +2,17 @@ import os
 import random
 import logging
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
 from src.quiz import QuizManager
-from src.keyboards import main_menu_keyboard, answer_keyboard
-from src.word_management import add_word, save_word, delete_word, confirm_delete, show_user_words, WAITING_WORD, \
-    WAITING_DELETE
+from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard
+from src.word_management import  WAITING_WORD
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-from datetime import datetime
 from src.quiz import check_session_timeout
-from datetime import datetime, timedelta
+from datetime import datetime
+from src.session_manager import save_session_data
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -40,29 +39,55 @@ def start_handler(update: Update, context: CallbackContext):
 
 
 def ask_question_handler(update: Update, context: CallbackContext):
-    """Генерация нового вопроса для пользователя."""
+    """Генерация нового вопроса и управление сессией."""
     user_id = update.effective_user.id
-    question = quiz.get_next_question(user_id)
+
+    # Убираем основную клавиатуру и показываем сессионную
+    if "current_question" not in context.user_data:
+        update.effective_message.reply_text(
+            "Сессия началась!",
+            reply_markup=ReplyKeyboardRemove()  # Скрываем основное меню
+        )
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Чтобы вернуться в меню, нажмите кнопку ниже:",
+            reply_markup=session_keyboard()  # Кнопка "В меню ↩️"
+        )
 
     # Инициализация сессии только при первом вызове
     if 'session_start' not in context.user_data:
         context.user_data.update({
-            'session_start': datetime.now(),  # Время начала
-            'correct_answers': 0,             # Счётчик правильных ответов
-            'active_session': True            # Флаг активности
+            'session_start': datetime.now(),
+            'correct_answers': 0,
+            'active_session': True,
+            'job': None  # Для управления таймером
         })
+
         # Запуск таймера неактивности (15 минут)
-        context.job_queue.run_once(
+        job = context.job_queue.run_once(
+            callback=check_session_timeout,
+            when=60,  # 900 секунд = 15 минут
+            context={'user_id': user_id},
+            name=str(user_id)
+        )
+        context.user_data['job'] = job  # Сохраняем задачу для сброса
+
+    # Если пользователь активен, сбрасываем таймер
+    if context.user_data.get('job'):
+        context.user_data['job'].schedule_removal()  # Удаляем старый таймер
+        new_job = context.job_queue.run_once(
             callback=check_session_timeout,
             when=900,
             context={'user_id': user_id},
             name=str(user_id)
         )
+        context.user_data['job'] = new_job  # Обновляем таймер
 
+    # Получение следующего вопроса
+    question = quiz.get_next_question(user_id)
     if not question:
-        # Если вопросы закончились и сессия активна
         if context.user_data.get('active_session'):
-            _save_session_data(user_id, context)
+            save_session_data(user_id, context)
             context.user_data.clear()
             keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
             context.bot.send_message(
@@ -214,27 +239,11 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
 def end_session(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if 'active_session' in context.user_data:
-        _save_session_data(user_id, context)
+        save_session_data(user_id, context)
         context.user_data.clear()
-    update.message.reply_text("Сессия завершена", reply_markup=main_menu_keyboard())
 
-
-def _save_session_data(user_id, context):
-    session_start = context.user_data.get('session_start')
-    if not session_start:
-        logger.error("Время начала сессии не найдено!")
-        return
-
-    session_end = datetime.now()
-    duration = round((session_end - session_start).total_seconds() / 60, 1)
-
-    # Добавляем буфер для корректного учёта времени
-    session_end_with_buffer = session_end + timedelta(seconds=1)
-    learned_words = db.count_new_learned_words(user_id, session_start, session_end_with_buffer)
-
-    db.update_session_stats(
-        user_id=user_id,
-        learned_words=learned_words,
-        session_duration=duration
+    # Возвращаем основное меню
+    update.message.reply_text(
+        "Сессия завершена",
+        reply_markup=main_menu_keyboard()
     )
-    logger.info(f"[DEBUG] Сессия сохранена: learned_words={learned_words}, duration={duration}")

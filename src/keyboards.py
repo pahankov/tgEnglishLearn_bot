@@ -32,3 +32,10 @@ def delete_more_keyboard():
         ],
         resize_keyboard=True
     )
+
+def session_keyboard():
+    """Клавиатура во время активной сессии"""
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("В меню ↩️")]],
+        resize_keyboard=True
+    )
