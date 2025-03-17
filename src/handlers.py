@@ -2,7 +2,7 @@ import os
 import random
 import logging
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
 from src.quiz import QuizManager
@@ -10,7 +10,7 @@ from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard
 from src.word_management import  WAITING_WORD
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-from src.quiz import check_session_timeout
+from src.session_manager import check_session_timeout
 from datetime import datetime
 from src.session_manager import save_session_data
 
@@ -42,20 +42,14 @@ def ask_question_handler(update: Update, context: CallbackContext):
     """Генерация нового вопроса и управление сессией."""
     user_id = update.effective_user.id
 
-    # Убираем основную клавиатуру и показываем сессионную
-    if "current_question" not in context.user_data:
+    # Проверяем, началась ли уже сессия
+    if 'active_session' not in context.user_data or not context.user_data['active_session']:
         update.effective_message.reply_text(
             "Сессия началась!",
-            reply_markup=ReplyKeyboardRemove()  # Скрываем основное меню
-        )
-        context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Чтобы вернуться в меню, нажмите кнопку ниже:",
             reply_markup=session_keyboard()  # Кнопка "В меню ↩️"
         )
 
-    # Инициализация сессии только при первом вызове
-    if 'session_start' not in context.user_data:
+        # Инициализируем данные сессии только при первом вызове
         context.user_data.update({
             'session_start': datetime.now(),
             'correct_answers': 0,
@@ -63,21 +57,21 @@ def ask_question_handler(update: Update, context: CallbackContext):
             'job': None  # Для управления таймером
         })
 
-        # Запуск таймера неактивности (15 минут)
+        # Запускаем таймер неактивности (15 минут)
         job = context.job_queue.run_once(
             callback=check_session_timeout,
-            when=60,  # 900 секунд = 15 минут
+            when=900,  # 900 секунд = 15 минут
             context={'user_id': user_id},
             name=str(user_id)
         )
-        context.user_data['job'] = job  # Сохраняем задачу для сброса
+        context.user_data['job'] = job  # Сохраняем задачу для сброса таймера
 
-    # Если пользователь активен, сбрасываем таймер
+    # Если пользователь активен, обновляем таймер
     if context.user_data.get('job'):
         context.user_data['job'].schedule_removal()  # Удаляем старый таймер
         new_job = context.job_queue.run_once(
             callback=check_session_timeout,
-            when=900,
+            when=900,  # 15 минут
             context={'user_id': user_id},
             name=str(user_id)
         )
@@ -86,6 +80,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
     # Получение следующего вопроса
     question = quiz.get_next_question(user_id)
     if not question:
+        # Если вопросы закончились
         if context.user_data.get('active_session'):
             save_session_data(user_id, context)
             context.user_data.clear()
@@ -113,7 +108,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
     options = [word_ru.capitalize()] + [ans.capitalize() for ans in wrong_answers]
     random.shuffle(options)
 
-    # Сохранение контекста
+    # Сохранение текущего вопроса в контексте пользователя
     context.user_data["current_question"] = {
         "word_en": word_en,
         "correct_answer": word_ru.capitalize(),
@@ -122,7 +117,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
         "options": options
     }
 
-    # Отправка вопроса
+    # Отправка вопроса пользователю
     context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"Переведи слово: *{word_en.capitalize()}*",

@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
 from src.keyboards import main_menu_keyboard, add_more_keyboard, delete_more_keyboard
@@ -7,97 +7,83 @@ import os
 import logging
 import re
 
+# ================== Настройки логирования ==================
 logger = logging.getLogger(__name__)
 
-# Инициализация компонентов
+# ================== Инициализация компонентов ==================
 db = Database()
 api_key = os.getenv("YANDEX_DICTIONARY_API_KEY")
 yandex_api = YandexDictionaryApi(api_key=api_key) if api_key else None
 
-# Состояния ConversationHandler
-(
-    WAITING_WORD,  # Ожидание ввода слова
-    WAITING_DELETE,  # Ожидание слова для удаления
-    WAITING_CHOICE,  # Выбор после добавления
-    WAITING_DELETE_CHOICE  # Выбор после удаления
-) = range(4)
+# ================== Состояния ConversationHandler ==================
+WAITING_WORD, WAITING_DELETE, WAITING_CHOICE, WAITING_DELETE_CHOICE = range(4)
 
-
+# ================== Утилиты ==================
 def pluralize_words(count: int) -> str:
     """Склонение слова 'слово' по числам"""
     last_digit = count % 10
     if last_digit == 1 and count % 100 != 11:
         return "слово"
-    elif 2 <= last_digit <= 4 and (count % 100 < 10 or count % 100 >= 20):
+    elif 2 <= last_digit <= 4 and not 11 <= count % 100 <= 19:
         return "слова"
     return "слов"
-
 
 # ================== Добавление слов ==================
 def add_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления слова"""
     update.message.reply_text(
-        "📝 Введите слово на русском языке:",
-        reply_markup=main_menu_keyboard()
+        text="📝 Введите слово на русском языке:",
+        reply_markup=add_more_keyboard()
     )
     return WAITING_WORD
 
-
 def save_word(update: Update, context: CallbackContext) -> int:
-    """Обработка введенного слова и сохранение в БД."""
+    """Обработка введенного слова и сохранение в БД"""
     user_id = update.effective_user.id
-    input_text = update.message.text.strip().lower()  # Приводим к нижнему регистру
+    input_text = update.message.text.strip().lower()
 
-    # Проверка на пустой ввод
     if not input_text:
-        update.message.reply_text("❌ Введите слово!", reply_markup=main_menu_keyboard())
+        update.message.reply_text("❌ Введите слово!", reply_markup=add_more_keyboard())
         return WAITING_WORD
 
-    # Проверка на одно слово
     if len(input_text.split()) > 1:
-        update.message.reply_text("❌ Введите только ОДНО слово!", reply_markup=main_menu_keyboard())
+        update.message.reply_text("❌ Введите только ОДНО слово!", reply_markup=add_more_keyboard())
         return WAITING_WORD
 
-    # Проверка на русские символы и дефис
     if not re.match(r'^[а-яё\-]+$', input_text):
-        update.message.reply_text("❌ Используйте только русские буквы и дефис!", reply_markup=main_menu_keyboard())
+        update.message.reply_text("❌ Используйте только русские буквы!", reply_markup=add_more_keyboard())
         return WAITING_WORD
 
-    # Проверка дубликатов слова (регистронезависимо)
     if db.check_duplicate(user_id, input_text):
         update.message.reply_text(
             f"❌ Слово '{input_text.capitalize()}' уже существует!",
-            reply_markup=main_menu_keyboard()
+            reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
 
-    # Получение перевода через API
     try:
         api_response = yandex_api.lookup(input_text, "ru-en")
         if not api_response or not api_response.get('def'):
             raise ValueError("Пустой ответ API")
 
-        # Извлекаем первый перевод и нормализуем регистр
         first_translation = api_response['def'][0]['tr'][0]['text'].lower()
     except Exception as e:
         logger.error(f"Ошибка перевода: {str(e)}")
-        update.message.reply_text("❌ Не удалось получить перевод!", reply_markup=main_menu_keyboard())
+        update.message.reply_text("❌ Не удалось получить перевод!", reply_markup=add_more_keyboard())
         return WAITING_WORD
 
-    # Проверка дубликата перевода (регистронезависимо)
     if db.check_duplicate(user_id, first_translation):
         update.message.reply_text(
             f"❌ Перевод '{first_translation.capitalize()}' уже существует!",
-            reply_markup=main_menu_keyboard()
+            reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
 
-    # Сохранение слова и перевода (в нижнем регистре)
     if db.add_user_word(user_id, first_translation, input_text):
         count = db.count_user_words(user_id)
         update.message.reply_text(
             f"✅ Успешно добавлено: {input_text.capitalize()} → {first_translation.capitalize()}\n"
-            f"📚 Всего слов: {count}",
+            f"📚 Всего слов добавлено: {count}",
             reply_markup=add_more_keyboard()
         )
         return WAITING_CHOICE
@@ -105,14 +91,13 @@ def save_word(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("❌ Ошибка при добавлении!", reply_markup=main_menu_keyboard())
         return ConversationHandler.END
 
-
 def handle_choice(update: Update, context: CallbackContext) -> int:
     """Обработка выбора после добавления"""
     choice = update.message.text
     if choice == "Добавить ещё ➕":
         update.message.reply_text(
             "📝 Введите следующее слово:",
-            reply_markup=main_menu_keyboard()
+            reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
     elif choice == "В меню ↩️":
@@ -128,16 +113,14 @@ def handle_choice(update: Update, context: CallbackContext) -> int:
         )
         return WAITING_CHOICE
 
-
 # ================== Удаление слов ==================
 def delete_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса удаления"""
     update.message.reply_text(
-        "🗑 Введите слово для удаления (русское или английское):",
-        reply_markup=main_menu_keyboard()
+        text="🗑 Введите слово для удаления (русское или английское):",
+        reply_markup=delete_more_keyboard()
     )
     return WAITING_DELETE
-
 
 def confirm_delete(update: Update, context: CallbackContext) -> int:
     """Обработка удаления и предложение продолжить"""
@@ -153,10 +136,9 @@ def confirm_delete(update: Update, context: CallbackContext) -> int:
     else:
         update.message.reply_text(
             f"❌ Слово '{word}' не найдено в вашем словаре!",
-            reply_markup=main_menu_keyboard()
+            reply_markup=delete_more_keyboard()
         )
-        return ConversationHandler.END
-
+        return WAITING_DELETE_CHOICE
 
 def handle_delete_choice(update: Update, context: CallbackContext) -> int:
     """Обработка выбора после удаления"""
@@ -164,7 +146,7 @@ def handle_delete_choice(update: Update, context: CallbackContext) -> int:
     if choice == "Удалить ещё ➖":
         update.message.reply_text(
             "🗑 Введите следующее слово для удаления:",
-            reply_markup=main_menu_keyboard()
+            reply_markup=delete_more_keyboard()
         )
         return WAITING_DELETE
     elif choice == "В меню ↩️":
@@ -180,7 +162,6 @@ def handle_delete_choice(update: Update, context: CallbackContext) -> int:
         )
         return WAITING_DELETE_CHOICE
 
-
 # ================== Показ слов ==================
 def show_user_words(update: Update, context: CallbackContext):
     """Отображение списка пользовательских слов"""
@@ -194,7 +175,7 @@ def show_user_words(update: Update, context: CallbackContext):
             )
             return
 
-        formatted = [f"• {en.capitalize()} → {ru.capitalize()}" for en, ru in words]
+        formatted = [f"• {en.capitalize()} - {ru.capitalize()}" for en, ru in words]
         count = len(words)
         update.message.reply_text(
             f"📖 Ваши слова ({count} {pluralize_words(count)}):\n" + "\n".join(formatted),
