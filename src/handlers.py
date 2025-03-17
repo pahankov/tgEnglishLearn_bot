@@ -230,15 +230,3 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
 
     return ConversationHandler.END
 
-# handlers.py
-def end_session(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    if 'active_session' in context.user_data:
-        save_session_data(user_id, context)
-        context.user_data.clear()
-
-    # Возвращаем основное меню
-    update.message.reply_text(
-        "Сессия завершена",
-        reply_markup=main_menu_keyboard()
-    )

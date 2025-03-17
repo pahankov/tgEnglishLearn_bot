@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+
+from telegram import Update
 from telegram.ext import CallbackContext
 from src.database import Database
 import logging
@@ -35,3 +37,15 @@ def check_session_timeout(context: CallbackContext):
             reply_markup=main_menu_keyboard()  # Восстанавливаем меню
         )
         context.user_data.clear()
+
+def end_session(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    if 'active_session' in context.user_data:
+        save_session_data(user_id, context)
+        context.user_data.clear()
+
+    # Возвращаем основное меню
+    update.message.reply_text(
+        "Сессия завершена",
+        reply_markup=main_menu_keyboard()
+    )

@@ -14,9 +14,9 @@ from src.handlers import (
     start_handler,
     ask_question_handler,
     button_click_handler,
-    reset_progress_handler,
-    end_session
+    reset_progress_handler
 )
+from src.session_manager import end_session
 from src.word_management import (
     add_word,
     save_word,
