@@ -6,7 +6,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src.database import Database
 from src.quiz import QuizManager
-from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard
+from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard, send_pronounce_button
+from src.sberspeech_api import SberSpeechAPI
 from src.word_management import  WAITING_WORD
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
@@ -61,7 +62,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
         # Запускаем таймер с передачей session_start в контекст
         job = context.job_queue.run_once(
             callback=check_session_timeout,
-            when=60,
+            when=900,
             context={
                 'user_id': user_id,
                 'session_start': session_start.timestamp()  # Сохраняем как timestamp
@@ -80,7 +81,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
     # Создаем новый таймер с актуальным session_start
     new_job = context.job_queue.run_once(
         callback=check_session_timeout,
-        when=60,
+        when=900,
         context={
             'user_id': user_id,
             'session_start': context.user_data['session_start'].timestamp()
@@ -138,7 +139,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)
     )
-
+    # Отправка кнопки "Произношение слова 🔊" отдельно
+    send_pronounce_button(update.effective_chat.id, context)
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -243,4 +245,30 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("❌ Не удалось добавить слово.", reply_markup=main_menu_keyboard())
 
     return ConversationHandler.END
+
+
+
+
+
+def pronounce_word_handler(update: Update, context: CallbackContext):
+    """Обработка кнопки 'Произношение слова 🔊'."""
+    query = update.callback_query
+    query.answer()  # Обязательно отвечаем на callback
+
+    # Получаем слово из текущего вопроса
+    current_question = context.user_data.get("current_question")
+    if not current_question or "word_en" not in current_question:
+        query.answer("❌ Не удалось найти слово для озвучивания.", show_alert=True)
+        return
+
+    word = current_question["word_en"]  # Слово для произношения
+    sber_speech = SberSpeechAPI()
+
+    # Синтезируем произношение
+    audio_file = sber_speech.synthesize_text(word)
+    if audio_file:
+        # Отправляем озвучку пользователю
+        context.bot.send_audio(chat_id=query.message.chat.id, audio=open(audio_file, "rb"))
+    else:
+        query.answer("❌ Произошла ошибка при озвучивании слова.", show_alert=True)
 

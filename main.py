@@ -14,7 +14,8 @@ from src.handlers import (
     start_handler,
     ask_question_handler,
     button_click_handler,
-    reset_progress_handler
+    reset_progress_handler,
+    pronounce_word_handler
 )
 from src.session_manager import end_session
 from src.word_management import (
@@ -44,21 +45,15 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    """Главная функция для запуска бота"""
+    """Главная функция для запуска бота."""
     # Инициализация бота
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
-    # ================== Базовые обработчики ==================
-    init_base_handlers(dispatcher)
+    # ================== Регистрация обработчиков ==================
+    init_handlers(dispatcher)
 
-    # ================== Обработчики главного меню ==================
-    init_menu_handlers(dispatcher)
-
-    # ================== Обработчики диалогов ==================
-    init_conversation_handler(dispatcher)
-
-    # ================== Обработка ошибок ==================
+    # Обработка ошибок
     dispatcher.add_error_handler(handle_errors)
 
     # Запуск бота
@@ -67,23 +62,30 @@ def main():
     updater.idle()
 
 
-def init_base_handlers(dispatcher):
-    """Инициализация базовых обработчиков"""
+def init_handlers(dispatcher):
+    """Инициализация всех обработчиков для бота."""
+    # Обработчики команд
     dispatcher.add_handler(CommandHandler("start", start_handler))
-    dispatcher.add_handler(CallbackQueryHandler(reset_progress_handler, pattern="^reset_progress$"))
-    dispatcher.add_handler(CallbackQueryHandler(button_click_handler))
 
-
-def init_menu_handlers(dispatcher):
-    """Инициализация обработчиков главного меню"""
+    # Обработчики для главного меню
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Начать тест 🚀$"), ask_question_handler))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Мои слова 📖$"), show_user_words))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Ваша статистика 📊$"), stats_handler))
+    dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), end_session))
+    dispatcher.add_handler(MessageHandler(Filters.regex(r"^Очистить 🗑$"), clear_user_sessions))
+
+    # CallbackQuery обработчики
+    dispatcher.add_handler(CallbackQueryHandler(reset_progress_handler, pattern="^reset_progress$"))
+    dispatcher.add_handler(CallbackQueryHandler(button_click_handler, pattern=r"^answer_"))
+    dispatcher.add_handler(CallbackQueryHandler(pronounce_word_handler, pattern="^pronounce_word$"))
+
+    # Обработчики для управления словами
+    init_word_management(dispatcher)
 
 
-def init_conversation_handler(dispatcher):
-    """Инициализация ConversationHandler для управления диалогами"""
-    conv_handler = ConversationHandler(
+def init_word_management(dispatcher):
+    """Инициализация ConversationHandler для управления словами."""
+    word_conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(Filters.regex(r"^Добавить слово ➕$"), add_word),
             MessageHandler(Filters.regex(r"^Удалить слово ➖$"), delete_word)
@@ -101,26 +103,21 @@ def init_conversation_handler(dispatcher):
             ConversationHandler.END: ConversationHandler.END
         }
     )
-    dispatcher.add_handler(conv_handler)
-
-    # Обработчик для выхода в главное меню
-    dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), end_session))
-    dispatcher.add_handler(MessageHandler(Filters.regex(r"^Очистить 🗑$"), clear_user_sessions))
+    dispatcher.add_handler(word_conv_handler)
 
 
 def cancel_action(update, context):
-    """Обработка команды отмены"""
+    """Обработка команды отмены."""
     update.message.reply_text(
-        "❌ Действие отменено",
+        "❌ Действие отменено.",
         reply_markup=main_menu_keyboard()
     )
     return ConversationHandler.END
 
 
 def handle_errors(update, context):
-    """Обработка ошибок"""
+    """Обработка ошибок."""
     logger.error(f"Ошибка: {context.error}")
-
 
 
 if __name__ == "__main__":
