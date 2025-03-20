@@ -58,13 +58,13 @@ def ask_question_handler(update: Update, context: CallbackContext):
             'job': None
         })
 
-        # Запускаем таймер с передачей session_start в контекст
+        # Запускаем таймер
         job = context.job_queue.run_once(
             callback=check_session_timeout,
             when=900,
             context={
                 'user_id': user_id,
-                'session_start': session_start.timestamp()  # Сохраняем как timestamp
+                'session_start': session_start.timestamp()
             },
             name=str(user_id)
         )
@@ -77,7 +77,6 @@ def ask_question_handler(update: Update, context: CallbackContext):
         except Exception as e:
             logger.error(f"Ошибка удаления задачи: {e}")
 
-    # Создаем новый таймер с актуальным session_start
     new_job = context.job_queue.run_once(
         callback=check_session_timeout,
         when=900,
@@ -88,8 +87,6 @@ def ask_question_handler(update: Update, context: CallbackContext):
         name=str(user_id)
     )
     context.user_data['job'] = new_job
-
-    # ... остальная логика ...
 
     # Получение следующего вопроса
     question = quiz.get_next_question(user_id)
@@ -138,8 +135,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)
     )
-    # Отправка кнопки "Произношение слова 🔊" отдельно
     send_pronounce_button(update.effective_chat.id, context)
+
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -171,17 +168,25 @@ def button_click_handler(update: Update, context: CallbackContext):
     word_type = current_question["word_type"]
     user_id = update.effective_user.id
 
-    # Проверка регистра
+    # Проверка ответа
     if user_answer.lower() == correct_answer.lower():
         if not db.check_word_progress(user_id, word_id, word_type):
-            # Передаём session_start из контекста
+            # Обновляем прогресс пользователя
             session_start = context.user_data.get("session_start")
-            logger.info(f"[DEBUG] session_start в button_click: {session_start}")  # Логирование
             quiz.mark_word_seen(user_id, word_id, word_type, session_start)
         del context.user_data["current_question"]
         query.answer(quiz.get_correct_response())
+
+        # Удаляем сообщение с предыдущим вопросом
+        try:
+            context.bot.delete_message(chat_id=query.message.chat.id, message_id=query.message.message_id)
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения: {e}")
+
+        # Отправляем новый вопрос
         ask_question_handler(update, context)
     else:
+        # Если ответ неправильный, перемешиваем варианты ответа и обновляем клавиатуру
         options = current_question["options"]
         random.shuffle(options)
         try:
@@ -189,6 +194,7 @@ def button_click_handler(update: Update, context: CallbackContext):
         except Exception as e:
             logger.warning(f"Ошибка обновления клавиатуры: {e}")
         query.answer(quiz.get_incorrect_response())
+
 
 def save_word_handler(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
