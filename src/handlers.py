@@ -49,6 +49,9 @@ def ask_question_handler(update: Update, context: CallbackContext):
             reply_markup=session_keyboard()
         )
 
+        # Отправляем кнопку "Произношение слова 🔊" один раз
+        send_pronounce_button(update.effective_chat.id, context)
+
         # Инициализируем данные сессии
         session_start = datetime.now()
         context.user_data.update({
@@ -135,7 +138,6 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)
     )
-    send_pronounce_button(update.effective_chat.id, context)
 
 
 def reset_progress_handler(update: Update, context: CallbackContext):
@@ -152,6 +154,7 @@ def reset_progress_handler(update: Update, context: CallbackContext):
 
 def button_click_handler(update: Update, context: CallbackContext):
     query = update.callback_query
+
     if "current_question" not in context.user_data:
         query.answer("❌ Сессия устарела. Начните новый тест.")
         return
@@ -194,6 +197,7 @@ def button_click_handler(update: Update, context: CallbackContext):
         except Exception as e:
             logger.warning(f"Ошибка обновления клавиатуры: {e}")
         query.answer(quiz.get_incorrect_response())
+
 
 
 def save_word_handler(update: Update, context: CallbackContext) -> int:
@@ -256,24 +260,27 @@ def save_word_handler(update: Update, context: CallbackContext) -> int:
 
 
 def pronounce_word_handler(update: Update, context: CallbackContext):
-    """Обработка кнопки 'Произношение слова 🔊'."""
+    logger.info("Функция pronounce_word_handler вызвана.")
     query = update.callback_query
-    query.answer()  # Обязательно отвечаем на callback
+    query.answer()
 
-    # Получаем слово из текущего вопроса
+    # Проверка текущего вопроса
     current_question = context.user_data.get("current_question")
     if not current_question or "word_en" not in current_question:
-        query.answer("❌ Не удалось найти слово для озвучивания.", show_alert=True)
+        logger.warning("Не удалось найти слово для озвучивания.")
+        query.answer("❌ Слово не найдено для произношения.", show_alert=True)
         return
 
-    word = current_question["word_en"]  # Слово для произношения
-    sber_speech = SberSpeechAPI()
-
-    # Синтезируем произношение
-    audio_file = sber_speech.synthesize_text(word)
-    if audio_file:
-        # Отправляем озвучку пользователю
-        context.bot.send_audio(chat_id=query.message.chat.id, audio=open(audio_file, "rb"))
-    else:
-        query.answer("❌ Произошла ошибка при озвучивании слова.", show_alert=True)
-
+    word = current_question["word_en"]
+    try:
+        sber_speech = SberSpeechAPI()
+        audio_file = sber_speech.synthesize_text(word)
+        if audio_file:
+            context.bot.send_audio(chat_id=query.message.chat.id, audio=open(audio_file, "rb"))
+            logger.info(f"Слово '{word}' успешно озвучено.")
+        else:
+            logger.error("Ошибка синтеза аудио.")
+            query.answer("❌ Произошла ошибка при озвучивании слова.", show_alert=True)
+    except Exception as e:
+        logger.error(f"Ошибка в pronounce_word_handler: {e}")
+        query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)

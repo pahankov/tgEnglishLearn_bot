@@ -60,4 +60,3 @@ def send_pronounce_button(chat_id, context):
         [InlineKeyboardButton("Произношение слова 🔊", callback_data="pronounce_word")]
     ])
     context.bot.send_message(chat_id, "Вы можете прослушать произношение слова здесь:", reply_markup=button)
-
