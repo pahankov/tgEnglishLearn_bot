@@ -4,7 +4,7 @@ import logging
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
-from src.database import Database
+from src import db
 from src.quiz import QuizManager
 from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard, send_pronounce_button
 from src.sberspeech_api import SberSpeechAPI
@@ -17,7 +17,6 @@ from src.session_manager import save_session_data
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-db = Database()
 quiz = QuizManager(db)
 
 YANDEX_API_KEY = os.getenv("YANDEX_DICTIONARY_API_KEY")

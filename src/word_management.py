@@ -1,6 +1,6 @@
-from telegram import Update, ReplyKeyboardRemove
+from telegram import Update
 from telegram.ext import CallbackContext, ConversationHandler
-from src.database import Database
+from src import db
 from src.keyboards import main_menu_keyboard, add_more_keyboard, delete_more_keyboard
 from src.yandex_api import YandexDictionaryApi
 import os
@@ -11,7 +11,6 @@ import re
 logger = logging.getLogger(__name__)
 
 # ================== Инициализация компонентов ==================
-db = Database()
 api_key = os.getenv("YANDEX_DICTIONARY_API_KEY")
 yandex_api = YandexDictionaryApi(api_key=api_key) if api_key else None
 

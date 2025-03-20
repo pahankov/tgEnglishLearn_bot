@@ -2,12 +2,12 @@ from datetime import datetime, timedelta
 
 from telegram import Update
 from telegram.ext import CallbackContext
-from src.database import Database
+from src import db
 import logging
 from src.keyboards import main_menu_keyboard
 
 logger = logging.getLogger(__name__)
-db = Database()
+
 
 def save_session_data(user_id, context):
     session_start = context.user_data.get('session_start')

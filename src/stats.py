@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 
 from telegram import Update
 from telegram.ext import CallbackContext
-from src.database import Database
+from src import db
 
 logger = logging.getLogger(__name__)
-db = Database()
+
 
 
 def get_user_statistics(user_id: int) -> dict:
