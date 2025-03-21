@@ -91,7 +91,6 @@ def save_word(update: Update, context: CallbackContext) -> int:
         return ConversationHandler.END
 
 def handle_choice(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора после добавления"""
     choice = update.message.text
     if choice == "Добавить ещё ➕":
         update.message.reply_text(
@@ -99,18 +98,27 @@ def handle_choice(update: Update, context: CallbackContext) -> int:
             reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
-    elif choice == "В меню ↩️":
-        update.message.reply_text(
-            "🏠 Возвращаемся в главное меню:",
-            reply_markup=main_menu_keyboard()
-        )
-        return ConversationHandler.END
     else:
         update.message.reply_text(
             "❌ Используйте кнопки для выбора!",
             reply_markup=add_more_keyboard()
         )
         return WAITING_CHOICE
+
+def handle_delete_choice(update: Update, context: CallbackContext) -> int:
+    choice = update.message.text
+    if choice == "Удалить ещё ➖":
+        update.message.reply_text(
+            "🗑 Введите следующее слово для удаления:",
+            reply_markup=delete_more_keyboard()
+        )
+        return WAITING_DELETE
+    else:
+        update.message.reply_text(
+            "❌ Используйте кнопки для выбора!",
+            reply_markup=delete_more_keyboard()
+        )
+        return WAITING_DELETE_CHOICE
 
 # ================== Удаление слов ==================
 def delete_word(update: Update, context: CallbackContext) -> int:

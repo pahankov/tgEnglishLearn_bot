@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import CallbackContext
 from src import db
 import logging
@@ -72,14 +72,24 @@ def check_session_timeout(context: CallbackContext):
         reply_markup=main_menu_keyboard()
     )
 
+
+
+
 def end_session(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if 'active_session' in context.user_data:
         save_session_data(user_id, context)
         context.user_data.clear()
 
-    # Возвращаем основное меню
+    # Сначала удаляем предыдущую клавиатуру
+    update.message.reply_text(
+        "⏳ Очищаем интерфейс...",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    # Затем отправляем сообщение с основным меню
     update.message.reply_text(
         "Сессия завершена",
         reply_markup=main_menu_keyboard()
     )
+
