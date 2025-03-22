@@ -40,18 +40,29 @@ def start_handler(update: Update, context: CallbackContext):
         reply_markup=main_menu_keyboard()
     )
 
+def delete_bot_messages(update: Update, context: CallbackContext):
+    """Удаление последних N сообщений бота в чате."""
+    try:
+        chat_id = update.effective_chat.id
+        max_messages_to_check = 100  # Например, обрабатываем только последние 100 сообщений
+        for message_id in range(update.message.message_id, update.message.message_id - max_messages_to_check, -1):
+            try:
+                context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except telegram.error.BadRequest as e:
+                logger.warning(f"Ошибка удаления сообщения {message_id}: {e}")
+    except Exception as e:
+        logger.error(f"Не удалось очистить чат: {e}")
 
-from telegram import ReplyKeyboardMarkup, KeyboardButton
+
+
+
 
 def ask_question_handler(update: Update, context: CallbackContext):
     """Генерация нового вопроса и управление сессией."""
+    # Удаляем все сообщения бота перед началом
+    delete_bot_messages(update, context)
     user_id = update.effective_user.id
 
-    # Перед началом выполняем очистку интерфейса
-    update.effective_message.reply_text(
-        "⏳ Очищаем предыдущий интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
 
     # Определяем клавиатуру с глобальной кнопкой "В меню ↩️"
     session_keyboard = ReplyKeyboardMarkup(
@@ -144,11 +155,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
         reply_markup=answer_keyboard(options)  # Клавиатура с вариантами ответов
     )
 
-    # Повторно отправляем клавиатуру с кнопкой "В меню ↩️"
-    update.effective_message.reply_text(
-        "Используйте варианты ниже или вернитесь в меню.",
-        reply_markup=session_keyboard
-    )
+
+
 
 
 
