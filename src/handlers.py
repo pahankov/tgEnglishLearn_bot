@@ -2,16 +2,14 @@ import os
 import random
 import logging
 import re
-
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 from src.quiz import QuizManager
-from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard, send_pronounce_button, \
-    add_more_keyboard, delete_more_keyboard, MENU_BUTTON
+from src.keyboards import main_menu_keyboard, answer_keyboard,  send_pronounce_button, \
+MENU_BUTTON
 from src.sberspeech_api import SberSpeechAPI
-from src.word_management import WAITING_WORD, WAITING_CHOICE, WAITING_DELETE, WAITING_DELETE_CHOICE, pluralize_words
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
 from src.session_manager import check_session_timeout
@@ -46,7 +44,7 @@ def delete_bot_messages(update: Update, context: CallbackContext):
     """Удаление последних N сообщений бота в чате."""
     try:
         chat_id = update.effective_chat.id
-        max_messages_to_check = 100  # Например, обрабатываем только последние 100 сообщений
+        max_messages_to_check = 20  # Например, обрабатываем только последние 20 сообщений
         for message_id in range(update.message.message_id, update.message.message_id - max_messages_to_check, -1):
             try:
                 context.bot.delete_message(chat_id=chat_id, message_id=message_id)
@@ -95,6 +93,9 @@ def ask_question_handler(update: Update, context: CallbackContext):
             name=str(user_id)
         )
         context.user_data['job'] = job
+
+        # Отправляем и закрепляем кнопку "Произношение слова 🔊" только при старте сессии
+        send_pronounce_button(update.effective_chat.id, context)
 
     # Логика обновления таймера
     if 'job' in context.user_data:
@@ -156,11 +157,6 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)  # Клавиатура с вариантами ответов
     )
-    # Отправка кнопки "Произношение слова 🔊" отдельно
-    send_pronounce_button(update.effective_chat.id, context)
-
-
-
 
 
 def button_click_handler(update: Update, context: CallbackContext):
@@ -205,6 +201,7 @@ def button_click_handler(update: Update, context: CallbackContext):
 
 
 def pronounce_word_handler(update: Update, context: CallbackContext):
+    """Обработчик для воспроизведения произношения текущего слова."""
     logger.info("Функция pronounce_word_handler вызвана.")
     query = update.callback_query
     query.answer()
@@ -218,17 +215,26 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
 
     word = current_question["word_en"]
     try:
+        # Подключение к API синтеза речи
         sber_speech = SberSpeechAPI()
         audio_file = sber_speech.synthesize_text(word)
+
         if audio_file:
-            context.bot.send_audio(chat_id=query.message.chat.id, audio=open(audio_file, "rb"))
+            # Отправляем аудио с произношением
+            with open(audio_file, "rb") as audio:
+                context.bot.send_audio(chat_id=query.message.chat.id, audio=audio)
             logger.info(f"Слово '{word}' успешно озвучено.")
         else:
             logger.error("Ошибка синтеза аудио.")
             query.answer("❌ Произошла ошибка при озвучивании слова.", show_alert=True)
+
+    except FileNotFoundError as e:
+        logger.error(f"Аудиофайл не найден: {e}")
+        query.answer("❌ Не удалось найти файл произношения.", show_alert=True)
     except Exception as e:
         logger.error(f"Ошибка в pronounce_word_handler: {e}")
         query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)
+
 
 
 
