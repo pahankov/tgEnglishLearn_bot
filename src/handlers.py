@@ -236,30 +236,56 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
         query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)
 
 
-
-
-
-
 def handle_menu_button(update: Update, context: CallbackContext):
-    """Обработчик кнопки 'В меню' для всех состояний"""
+    """Обработчик кнопки 'В меню' для завершения сессии."""
     user_id = update.effective_user.id
+    logger.info(f"✅ Обработка нажатия кнопки 'В меню' для пользователя {user_id}.")
 
-    # Частичный сброс данных вместо полной очистки
+    # Проверка активной сессии
+    if 'active_session' in context.user_data:
+        logger.info(f"⏱ Сохранение данных активной сессии для пользователя {user_id}.")
+
+        # Сохранение данных сессии
+        try:
+            save_session_data(user_id, context)
+            logger.info(f"✅ Данные сессии успешно сохранены для пользователя {user_id}.")
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения данных сессии: {e}")
+
+    # Очистка данных пользователя
+    logger.info(f"🗑 Очистка данных сессии для пользователя {user_id}.")
+    if 'job' in context.user_data:
+        try:
+            context.user_data['job'].schedule_removal()
+            logger.info(f"✅ Таймер успешно удален для пользователя {user_id}.")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка удаления задачи таймера: {e}")
+        context.user_data.pop('job', None)
+
+    # Удаление данных, связанных с сессией
     keys_to_remove = [
         'active_session',
         'current_state',
         'word',
-        'translation'
+        'translation',
+        'current_question',
+        'session_start',
+        'correct_answers'
     ]
-
     for key in keys_to_remove:
-        context.user_data.pop(key, None)
+        if key in context.user_data:
+            context.user_data.pop(key, None)
+            logger.debug(f"[DEBUG] Удален ключ '{key}' из user_data.")
 
-    # Отправка меню в ОДНОМ сообщении
-    update.message.reply_text(
-        text="🏠 Главное меню:",
-        reply_markup=main_menu_keyboard()
-    )
+    # Отправка главного меню
+    try:
+        update.message.reply_text(
+            text="🏠 Главное меню:",
+            reply_markup=main_menu_keyboard()
+        )
+        logger.info(f"✅ Пользователю {user_id} отправлено главное меню.")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при отправке главного меню для пользователя {user_id}: {e}")
 
-    # Явный сброс состояния через возврат ConversationHandler.END
+    # Возврат для явного завершения ConversationHandler
     return ConversationHandler.END
