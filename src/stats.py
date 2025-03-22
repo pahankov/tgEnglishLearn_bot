@@ -2,6 +2,7 @@ import logging
 import io
 import matplotlib
 
+from src.handlers import ask_question_handler
 from src.keyboards import stats_keyboard
 
 matplotlib.use('Agg')  # Используем backend, не зависящий от дисплея
@@ -122,3 +123,14 @@ def clear_user_sessions(update: Update, context: CallbackContext):
             "❌ Произошла ошибка при очистке данных.",
             reply_markup=stats_keyboard()  # Клавиатура статистики
         )
+
+def reset_progress_handler(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    try:
+        with db.conn:
+            db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
+        update.callback_query.answer("✅ Прогресс сброшен!")
+        ask_question_handler(update, context)
+    except Exception as e:
+        logger.error(f"Ошибка сброса: {e}")
+        update.callback_query.answer("❌ Ошибка!")

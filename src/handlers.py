@@ -2,12 +2,12 @@ import os
 import random
 import logging
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 from src.quiz import QuizManager
 from src.keyboards import main_menu_keyboard, answer_keyboard, session_keyboard, send_pronounce_button, \
-    add_more_keyboard, delete_more_keyboard
+    add_more_keyboard, delete_more_keyboard, MENU_BUTTON
 from src.sberspeech_api import SberSpeechAPI
 from src.word_management import WAITING_WORD, WAITING_CHOICE, WAITING_DELETE, WAITING_DELETE_CHOICE, pluralize_words
 from src.yandex_api import YandexDictionaryApi
@@ -26,16 +26,6 @@ if not YANDEX_API_KEY:
 yandex_api = YandexDictionaryApi(api_key=YANDEX_API_KEY)
 
 
-
-
-
-def delete_active_keyboard(update: Update, context: CallbackContext):
-    """
-    Отправляет сообщение с ReplyKeyboardRemove для принудительного удаления активной клавиатуры.
-    """
-    update.message.reply_text("⏳ Очистка интерфейса...", reply_markup=ReplyKeyboardRemove())
-
-
 # ================== Обработчики для главного меню и сессии ==================
 
 def start_handler(update: Update, context: CallbackContext):
@@ -51,20 +41,30 @@ def start_handler(update: Update, context: CallbackContext):
     )
 
 
+from telegram import ReplyKeyboardMarkup, KeyboardButton
+
 def ask_question_handler(update: Update, context: CallbackContext):
     """Генерация нового вопроса и управление сессией."""
     user_id = update.effective_user.id
 
     # Перед началом выполняем очистку интерфейса
-    update.effective_message.reply_text("⏳ Очищаем предыдущий интерфейс...", reply_markup=ReplyKeyboardRemove())
+    update.effective_message.reply_text(
+        "⏳ Очищаем предыдущий интерфейс...",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
+    # Определяем клавиатуру с глобальной кнопкой "В меню ↩️"
+    session_keyboard = ReplyKeyboardMarkup(
+        [[MENU_BUTTON]],  # Используем глобальную переменную MENU_BUTTON
+        resize_keyboard=True  # Чтобы клавиатура была компактной
+    )
+
+    # Если сессия ещё не начата
     if 'active_session' not in context.user_data or not context.user_data['active_session']:
         update.effective_message.reply_text(
             "Сессия началась!",
-            reply_markup=session_keyboard()
+            reply_markup=session_keyboard  # Добавляем клавиатуру
         )
-        # Отправляем кнопку "Произношение слова 🔊" один раз
-        send_pronounce_button(update.effective_chat.id, context)
         session_start = datetime.now()
         context.user_data.update({
             'session_start': session_start,
@@ -83,7 +83,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
         )
         context.user_data['job'] = job
 
-    # Обновляем таймер
+    # Логика обновления таймера
     if 'job' in context.user_data:
         try:
             context.user_data['job'].schedule_removal()
@@ -107,11 +107,10 @@ def ask_question_handler(update: Update, context: CallbackContext):
         if context.user_data.get('active_session'):
             save_session_data(user_id, context)
             context.user_data.clear()
-            keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
             context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="🎉 Вы изучили все слова! Отличная работа!",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                reply_markup=main_menu_keyboard()
             )
         return
 
@@ -141,20 +140,15 @@ def ask_question_handler(update: Update, context: CallbackContext):
         chat_id=update.effective_chat.id,
         text=f"Переведи слово: *{word_en.capitalize()}*",
         parse_mode="Markdown",
-        reply_markup=answer_keyboard(options)
+        reply_markup=answer_keyboard(options)  # Клавиатура с вариантами ответов
     )
 
+    # Повторно отправляем клавиатуру с кнопкой "В меню ↩️"
+    update.effective_message.reply_text(
+        "Используйте варианты ниже или вернитесь в меню.",
+        reply_markup=session_keyboard
+    )
 
-def reset_progress_handler(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    try:
-        with db.conn:
-            db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
-        update.callback_query.answer("✅ Прогресс сброшен!")
-        ask_question_handler(update, context)
-    except Exception as e:
-        logger.error(f"Ошибка сброса: {e}")
-        update.callback_query.answer("❌ Ошибка!")
 
 
 def button_click_handler(update: Update, context: CallbackContext):
@@ -197,186 +191,6 @@ def button_click_handler(update: Update, context: CallbackContext):
             logger.warning(f"Ошибка обновления клавиатуры: {e}")
         query.answer(quiz.get_incorrect_response())
 
-
-
-# ================== Обработчики для управления словами (ConversationHandler) ==================
-
-def add_word(update: Update, context: CallbackContext) -> int:
-    """Начало процесса добавления слова."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    update.message.reply_text(
-        "📝 Введите слово на русском языке:",
-        reply_markup=add_more_keyboard()
-    )
-    return WAITING_WORD
-
-def save_word_handler(update: Update, context: CallbackContext) -> int:
-    user_id = update.effective_user.id
-    input_text = update.message.text.strip().lower()
-
-    if len(input_text.split()) > 1:
-        update.message.reply_text("❌ Введите только ОДНО слово!", reply_markup=main_menu_keyboard())
-        return WAITING_WORD
-
-    if not re.match(r'^[а-яё\-]+$', input_text):
-        update.message.reply_text("❌ Используйте только русские буквы и дефис.", reply_markup=main_menu_keyboard())
-        return WAITING_WORD
-
-    if db.check_duplicate(user_id, input_text):
-        update.message.reply_text(
-            f"❌ Слово '{input_text}' уже существует в базе!",
-            reply_markup=main_menu_keyboard()
-        )
-        return WAITING_WORD
-
-    try:
-        api_response = yandex_api.lookup(input_text, "ru-en")
-        if not api_response or not api_response.get('def'):
-            update.message.reply_text("❌ Перевод не найден.", reply_markup=main_menu_keyboard())
-            return WAITING_WORD
-
-        first_translation = api_response['def'][0]['tr'][0]['text'].lower()
-    except Exception as e:
-        logger.error(f"Ошибка перевода: {e}")
-        update.message.reply_text("❌ Ошибка обработки перевода.", reply_markup=main_menu_keyboard())
-        return WAITING_WORD
-
-    if db.check_duplicate(user_id, first_translation):
-        update.message.reply_text(
-            f"❌ Перевод '{first_translation}' уже существует!",
-            reply_markup=main_menu_keyboard()
-        )
-        return WAITING_WORD
-
-    if db.add_user_word(user_id, first_translation, input_text):
-        count = db.count_user_words(user_id)
-        update.message.reply_text(
-            f"✅ Слово '{input_text}' успешно добавлено!\nВсего слов: {count}",
-            reply_markup=main_menu_keyboard()
-        )
-    else:
-        update.message.reply_text("❌ Не удалось добавить слово.", reply_markup=main_menu_keyboard())
-
-    return ConversationHandler.END
-
-def handle_choice(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора после добавления."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    choice = update.message.text
-    if choice == "Добавить ещё ➕":
-        update.message.reply_text(
-            "📝 Введите следующее слово:",
-            reply_markup=add_more_keyboard()
-        )
-        return WAITING_WORD
-    elif choice == "В меню ↩️":
-        update.message.reply_text(
-            "🏠 Возвращаемся в главное меню:",
-            reply_markup=main_menu_keyboard()
-        )
-        return ConversationHandler.END
-    else:
-        update.message.reply_text(
-            "❌ Используйте кнопки для выбора!",
-            reply_markup=add_more_keyboard()
-        )
-        return WAITING_CHOICE
-
-def delete_word(update: Update, context: CallbackContext) -> int:
-    """Начало процесса удаления слова."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    update.message.reply_text(
-        "🗑 Введите слово для удаления (русское или английское):",
-        reply_markup=delete_more_keyboard()
-    )
-    return WAITING_DELETE
-
-def confirm_delete(update: Update, context: CallbackContext) -> int:
-    """Обработка удаления и предложение продолжить."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    user_id = update.effective_user.id
-    word = update.message.text.strip().lower()
-
-    if db.delete_user_word(user_id, word):
-        update.message.reply_text(
-            f"✅ Слово/перевод '{word}' успешно удалено!",
-            reply_markup=delete_more_keyboard()
-        )
-        return WAITING_DELETE_CHOICE
-    else:
-        update.message.reply_text(
-            f"❌ Слово '{word}' не найдено в вашем словаре!",
-            reply_markup=delete_more_keyboard()
-        )
-        return WAITING_DELETE_CHOICE
-
-def handle_delete_choice(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора после удаления слова."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    choice = update.message.text
-    if choice == "Удалить ещё ➖":
-        update.message.reply_text(
-            "🗑 Введите следующее слово для удаления:",
-            reply_markup=delete_more_keyboard()
-        )
-        return WAITING_DELETE
-    elif choice == "В меню ↩️":
-        update.message.reply_text(
-            "🏠 Возвращаемся в главное меню:",
-            reply_markup=main_menu_keyboard()
-        )
-        return ConversationHandler.END
-    else:
-        update.message.reply_text(
-            "❌ Используйте кнопки для выбора!",
-            reply_markup=delete_more_keyboard()
-        )
-        return WAITING_DELETE_CHOICE
-
-
-def show_user_words(update: Update, context: CallbackContext):
-    """Отображение списка пользовательских слов."""
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    user_id = update.effective_user.id
-    try:
-        words = db.get_user_words(user_id)
-        if not words:
-            update.message.reply_text(
-                "📭 Ваш словарь пока пуст!",
-                reply_markup=main_menu_keyboard()
-            )
-            return
-
-        formatted = [f"• {en.capitalize()} - {ru.capitalize()}" for en, ru in words]
-        count = len(words)
-        update.message.reply_text(
-            f"📖 Ваши слова ({count} {pluralize_words(count)}):\n" + "\n".join(formatted),
-            reply_markup=main_menu_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"Ошибка показа слов: {str(e)}")
-        update.message.reply_text(
-            "❌ Ошибка при загрузке слов!",
-            reply_markup=main_menu_keyboard()
-        )
 
 def pronounce_word_handler(update: Update, context: CallbackContext):
     logger.info("Функция pronounce_word_handler вызвана.")

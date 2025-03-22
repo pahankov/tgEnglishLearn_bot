@@ -6,9 +6,9 @@ MENU_BUTTON = KeyboardButton("В меню ↩️")
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton("Начать тест 🚀"), KeyboardButton("Добавить слово ➕")],
-            [KeyboardButton("Удалить слово ➖"), KeyboardButton("Мои слова 📖")],
-            [MENU_BUTTON]
+            [KeyboardButton("Начать тест 🚀")],
+            [KeyboardButton("Удалить слово ➖"), KeyboardButton("Добавить слово ➕")],
+            [KeyboardButton("Ваша статистика 📊"), KeyboardButton("Мои слова 📖")]
         ],
         resize_keyboard=True
     )
@@ -59,5 +59,3 @@ def send_pronounce_button(chat_id, context):
     ])
     context.bot.send_message(chat_id, "Вы можете прослушать произношение слова здесь:", reply_markup=button)
 
-# Общая кнопка для всех клавиатур
-MENU_BUTTON = KeyboardButton("В меню ↩️")
