@@ -2,6 +2,8 @@ import os
 import random
 import logging
 import re
+
+import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
@@ -154,7 +156,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)  # Клавиатура с вариантами ответов
     )
-
+    # Отправка кнопки "Произношение слова 🔊" отдельно
+    send_pronounce_button(update.effective_chat.id, context)
 
 
 
