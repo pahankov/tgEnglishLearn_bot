@@ -12,7 +12,7 @@ MENU_BUTTON
 from src.sberspeech_api import SberSpeechAPI
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-from src.session_manager import check_session_timeout
+from src.session_manager import check_session_timeout, update_session_timer, start_session
 from datetime import datetime
 from src.session_manager import save_session_data
 
@@ -40,18 +40,6 @@ def start_handler(update: Update, context: CallbackContext):
         reply_markup=main_menu_keyboard()
     )
 
-def delete_bot_messages(update: Update, context: CallbackContext):
-    """Удаление последних N сообщений бота в чате."""
-    try:
-        chat_id = update.effective_chat.id
-        max_messages_to_check = 20  # Например, обрабатываем только последние 20 сообщений
-        for message_id in range(update.message.message_id, update.message.message_id - max_messages_to_check, -1):
-            try:
-                context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            except telegram.error.BadRequest as e:
-                logger.warning(f"Ошибка удаления сообщения {message_id}: {e}")
-    except Exception as e:
-        logger.error(f"Не удалось очистить чат: {e}")
 
 
 
@@ -59,61 +47,14 @@ def delete_bot_messages(update: Update, context: CallbackContext):
 
 def ask_question_handler(update: Update, context: CallbackContext):
     """Генерация нового вопроса и управление сессией."""
-    # Удаляем все сообщения бота перед началом
-    delete_bot_messages(update, context)
     user_id = update.effective_user.id
-
-
-    # Определяем клавиатуру с глобальной кнопкой "В меню ↩️"
-    session_keyboard = ReplyKeyboardMarkup(
-        [[MENU_BUTTON]],  # Используем глобальную переменную MENU_BUTTON
-        resize_keyboard=True  # Чтобы клавиатура была компактной
-    )
 
     # Если сессия ещё не начата
     if 'active_session' not in context.user_data or not context.user_data['active_session']:
-        update.effective_message.reply_text(
-            "Сессия началась!",
-            reply_markup=session_keyboard  # Добавляем клавиатуру
-        )
-        session_start = datetime.now()
-        context.user_data.update({
-            'session_start': session_start,
-            'correct_answers': 0,
-            'active_session': True,
-            'job': None
-        })
-        job = context.job_queue.run_once(
-            callback=check_session_timeout,
-            when=900,
-            context={
-                'user_id': user_id,
-                'session_start': session_start.timestamp()
-            },
-            name=str(user_id)
-        )
-        context.user_data['job'] = job
+        start_session(update, context)
 
-        # Отправляем и закрепляем кнопку "Произношение слова 🔊" только при старте сессии
-        send_pronounce_button(update.effective_chat.id, context)
-
-    # Логика обновления таймера
-    if 'job' in context.user_data:
-        try:
-            context.user_data['job'].schedule_removal()
-        except Exception as e:
-            logger.error(f"Ошибка удаления задачи: {e}")
-
-    new_job = context.job_queue.run_once(
-        callback=check_session_timeout,
-        when=900,
-        context={
-            'user_id': user_id,
-            'session_start': context.user_data['session_start'].timestamp()
-        },
-        name=str(user_id)
-    )
-    context.user_data['job'] = new_job
+    # Обновление таймера сессии
+    update_session_timer(context, user_id)
 
     # Получение следующего вопроса
     question = quiz.get_next_question(user_id)
@@ -155,11 +96,12 @@ def ask_question_handler(update: Update, context: CallbackContext):
         chat_id=update.effective_chat.id,
         text=f"Переведи слово: *{word_en.capitalize()}*",
         parse_mode="Markdown",
-        reply_markup=answer_keyboard(options)  # Клавиатура с вариантами ответов
+        reply_markup=answer_keyboard(options)
     )
 
 
 def button_click_handler(update: Update, context: CallbackContext):
+    """Обработка ответа пользователя."""
     query = update.callback_query
     if "current_question" not in context.user_data:
         query.answer("❌ Сессия устарела. Начните новый тест.")
