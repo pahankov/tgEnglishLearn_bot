@@ -18,7 +18,7 @@ from src.handlers import (
     pronounce_word_handler,
     handle_menu_button
 )
-from src.stats import stats_handler, clear_user_sessions
+from src.stats import stats_handler, clear_user_sessions, reset_progress_handler
 from src.word_management import (
     add_word,
     save_word,
@@ -95,6 +95,7 @@ def main():
     # 5. CallbackQuery обработчики
     dispatcher.add_handler(CallbackQueryHandler(button_click_handler, pattern=r"^answer_"))
     dispatcher.add_handler(CallbackQueryHandler(pronounce_word_handler, pattern="^pronounce_word$"))
+    dispatcher.add_handler(CallbackQueryHandler(reset_progress_handler, pattern="^reset_progress$"))
 
     # 6. Обработка ошибок
     dispatcher.add_error_handler(lambda u, c: logger.error(f"Ошибка: {c.error}"))

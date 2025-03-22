@@ -107,10 +107,11 @@ def ask_question_handler(update: Update, context: CallbackContext):
         if context.user_data.get('active_session'):
             save_session_data(user_id, context)
             context.user_data.clear()
+            keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
             context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="🎉 Вы изучили все слова! Отличная работа!",
-                reply_markup=main_menu_keyboard()
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
         return
 
