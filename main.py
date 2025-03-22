@@ -1,4 +1,5 @@
 import logging
+from telegram import ReplyKeyboardRemove
 from telegram.ext import (
     Updater,
     CommandHandler,
@@ -17,7 +18,7 @@ from src.handlers import (
     pronounce_word_handler,
     handle_menu_button
 )
-from src.stats import stats_handler
+from src.stats import stats_handler, clear_user_sessions
 from src.word_management import (
     add_word,
     save_word,
@@ -54,54 +55,48 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start_handler))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), handle_menu_button))
 
-    # 2. ConversationHandlers должны быть зарегистрированы ДО обработчиков меню
-    # 3. ConversationHandler для добавления слов
+    # 2. ConversationHandlers
     add_conv = ConversationHandler(
         entry_points=[MessageHandler(Filters.regex(r"^Добавить слово ➕$"), add_word)],
         states={
-            WAITING_WORD: [MessageHandler(
-                Filters.text & ~Filters.command,
-                save_word
-            )],
-            WAITING_CHOICE: [MessageHandler(
-                Filters.regex(r"^(Добавить ещё ➕|В меню ↩️)$"),
-                handle_choice
-            )]
+            WAITING_WORD: [MessageHandler(Filters.text & ~Filters.command, save_word)],
+            WAITING_CHOICE: [MessageHandler(Filters.regex(r"^(Добавить ещё ➕|В меню ↩️)$"), handle_choice)]
         },
         fallbacks=[],
-        allow_reentry=True  # Разрешаем повторный вход
+        allow_reentry=True,
+        per_user=True
     )
 
-    # 4. ConversationHandler для удаления слов
     delete_conv = ConversationHandler(
         entry_points=[MessageHandler(Filters.regex(r"^Удалить слово ➖$"), delete_word)],
         states={
-            WAITING_DELETE: [MessageHandler(
-                Filters.text & ~Filters.command,
-                confirm_delete
-            )],
-            WAITING_DELETE_CHOICE: [MessageHandler(
-                Filters.regex(r"^(Удалить ещё ➖|В меню ↩️)$"),
-                handle_delete_choice
-            )]
+            WAITING_DELETE: [MessageHandler(Filters.text & ~Filters.command, confirm_delete)],
+            WAITING_DELETE_CHOICE: [MessageHandler(Filters.regex(r"^(Удалить ещё ➖|В меню ↩️)$"), handle_delete_choice)]
         },
         fallbacks=[],
-        allow_reentry=True  # Разрешаем повторный вход
+        allow_reentry=True,
+        per_user=True
     )
 
     dispatcher.add_handler(add_conv)
     dispatcher.add_handler(delete_conv)
 
-    # 5. Обработчики главного меню (регистрируем ПОСЛЕ ConversationHandler)
+    # 3. Обработчики главного меню
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Начать тест 🚀$"), ask_question_handler))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Мои слова 📖$"), show_user_words))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^Ваша статистика 📊$"), stats_handler))
 
-    # 6. CallbackQuery обработчики
+    # 4. Обработчик кнопки "Очистить 🗑"
+    dispatcher.add_handler(MessageHandler(
+        Filters.regex(r"^Очистить 🗑$"),
+        lambda update, context: clear_user_sessions(update, context)
+    ))
+
+    # 5. CallbackQuery обработчики
     dispatcher.add_handler(CallbackQueryHandler(button_click_handler, pattern=r"^answer_"))
     dispatcher.add_handler(CallbackQueryHandler(pronounce_word_handler, pattern="^pronounce_word$"))
 
-    # 7. Обработка ошибок
+    # 6. Обработка ошибок
     dispatcher.add_error_handler(lambda u, c: logger.error(f"Ошибка: {c.error}"))
 
     # Запуск бота

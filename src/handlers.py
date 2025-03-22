@@ -218,26 +218,30 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в pronounce_word_handler: {e}")
         query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)
 
+
+
+
+
 def handle_menu_button(update: Update, context: CallbackContext):
     """Обработчик кнопки 'В меню' для всех состояний"""
     user_id = update.effective_user.id
 
-    # Если активна сессия, сохраняем данные
-    if 'active_session' in context.user_data:
-        save_session_data(user_id, context)
-        context.user_data.clear()
+    # Частичный сброс данных вместо полной очистки
+    keys_to_remove = [
+        'active_session',
+        'current_state',
+        'word',
+        'translation'
+    ]
 
-    # Удаляем клавиатуру
-    update.message.reply_text(
-        "⏳ Возвращаемся в главное меню...",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    for key in keys_to_remove:
+        context.user_data.pop(key, None)
 
-    # Отправляем главное меню
+    # Отправка меню в ОДНОМ сообщении
     update.message.reply_text(
-        "🏠 Главное меню:",
+        text="🏠 Главное меню:",
         reply_markup=main_menu_keyboard()
     )
 
-    # Завершаем все состояния ConversationHandler
+    # Явный сброс состояния через возврат ConversationHandler.END
     return ConversationHandler.END
