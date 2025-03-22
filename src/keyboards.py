@@ -13,10 +13,11 @@ def main_menu_keyboard():
         resize_keyboard=True
     )
 
+# Добавляем кнопку "Назад"
 def add_more_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton("Добавить ещё ➕"), MENU_BUTTON]
+            [KeyboardButton("Добавить ещё ➕"), KeyboardButton("Назад ↩️")]
         ],
         resize_keyboard=True
     )
@@ -24,7 +25,7 @@ def add_more_keyboard():
 def delete_more_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton("Удалить ещё ➖"), MENU_BUTTON]
+            [KeyboardButton("Удалить ещё ➖"), KeyboardButton("Назад ↩️")]
         ],
         resize_keyboard=True
     )
