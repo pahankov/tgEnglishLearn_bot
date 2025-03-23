@@ -50,6 +50,7 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start_handler))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), handle_menu_button))
 
+
     # 2. ConversationHandlers
     add_conv = ConversationHandler(
         entry_points=[MessageHandler(Filters.regex(r"^Добавить слово ➕$"), add_word)],
@@ -88,6 +89,8 @@ def main():
         Filters.regex(r"^Очистить 🗑$"),
         lambda update, context: clear_user_sessions(update, context)
     ))
+
+    dispatcher.add_handler(MessageHandler(Filters.regex(r"^Назад ↩️$"), handle_back_to_menu))
 
     # 5. CallbackQuery обработчики
     dispatcher.add_handler(CallbackQueryHandler(button_click_handler, pattern=r"^answer_"))

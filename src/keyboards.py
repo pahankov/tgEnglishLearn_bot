@@ -39,7 +39,7 @@ def session_keyboard():
 def stats_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton("Очистить 🗑"), MENU_BUTTON]
+            [KeyboardButton("Очистить 🗑"), KeyboardButton("Назад ↩️")]
         ],
         resize_keyboard=True
     )
