@@ -1,17 +1,19 @@
 import os
-import requests
 import base64
 import time
-import logging
 import uuid
-from dotenv import load_dotenv  # Для загрузки переменных окружения из .env
+import logging
+import requests
+from dotenv import load_dotenv
+from typing import Optional
 
-# Загружаем переменные окружения
+# Загрузка переменных окружения
 load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class SberSpeechAPI:
     def __init__(self):
@@ -24,7 +26,7 @@ class SberSpeechAPI:
         if not self.client_id or not self.client_secret:
             raise ValueError("SBER_CLIENT_ID и SBER_CLIENT_SECRET должны быть указаны в файле .env")
 
-    def get_access_token(self):
+    def get_access_token(self) -> Optional[str]:
         """Получение Access Token."""
         if self.access_token and self.token_expires_at > time.time():
             return self.access_token  # Возвращаем токен, если он ещё действителен
@@ -37,7 +39,7 @@ class SberSpeechAPI:
             "Authorization": f"Basic {encoded_credentials}",
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
-            "RqUID": str(uuid.uuid4())
+            "RqUID": str(uuid.uuid4()),
         }
         payload = {"scope": "SALUTE_SPEECH_PERS"}
 
@@ -53,7 +55,7 @@ class SberSpeechAPI:
             logger.error(f"Ошибка при получении токена: {e}")
             return None
 
-    def synthesize_text(self, text, voice="female", language="ru", output_file="output.ogg"):
+    def synthesize_text(self, text: str, output_file: str = "output.ogg") -> Optional[str]:
         """Синтезирует текст в аудио через Sber Speech API."""
         access_token = self.get_access_token()
         if not access_token:
@@ -63,14 +65,13 @@ class SberSpeechAPI:
         url = "https://smartspeech.sber.ru/rest/v1/text:synthesize"
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/text",  # Или application/ssml
+            "Content-Type": "application/text",
             "Accept": "application/json",
-            "RqUID": str(uuid.uuid4())
+            "RqUID": str(uuid.uuid4()),
         }
-        payload = text  # Просто текст
 
         try:
-            response = requests.post(url, headers=headers, data=payload, verify=False)
+            response = requests.post(url, headers=headers, data=text, verify=False)
             response.raise_for_status()
 
             # Сохраняем аудиофайл

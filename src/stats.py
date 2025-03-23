@@ -1,45 +1,36 @@
 import logging
 import io
 import matplotlib
-
+from telegram import Update
+from telegram.ext import CallbackContext
 from src.handlers import ask_question_handler
 from src.keyboards import stats_keyboard
 from src.session_manager import send_message_with_tracking
+from src import db
 
 matplotlib.use('Agg')  # Используем backend, не зависящий от дисплея
 import matplotlib.pyplot as plt
 
-from telegram import Update
-from telegram.ext import CallbackContext
-from src import db
-
 logger = logging.getLogger(__name__)
+
 
 def get_user_statistics(user_id: int) -> dict:
     stats = {}
     try:
-        # Запрос для learned_words
         db.cur.execute("SELECT COUNT(*) FROM user_progress WHERE user_id = %s", (user_id,))
-        learned = db.cur.fetchone()[0]
-        stats['learned_words'] = learned
-        logger.info(f"[DEBUG] Всего изучено слов: {learned}")  # Логирование
+        stats['learned_words'] = db.cur.fetchone()[0]
 
-        # Запрос для added_words
         db.cur.execute("SELECT COUNT(*) FROM user_words WHERE user_id = %s", (user_id,))
-        added = db.cur.fetchone()[0]
-        stats['added_words'] = added
-        logger.info(f"[DEBUG] Всего добавлено слов: {added}")
+        stats['added_words'] = db.cur.fetchone()[0]
 
-        # Запрос для session_stats
         db.cur.execute("SELECT session_date, learned_words FROM session_stats WHERE user_id = %s", (user_id,))
-        sessions = db.cur.fetchall()
-        stats['session_stats'] = sessions
-        logger.info(f"[DEBUG] Данные сессий: {sessions}")
+        stats['session_stats'] = db.cur.fetchall()
 
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}")
 
     return stats
+
 
 def generate_stats_chart(session_stats):
     dates = [s[0].strftime("%Y-%m-%d %H:%M") for s in session_stats]
@@ -58,6 +49,7 @@ def generate_stats_chart(session_stats):
     buf.seek(0)
     return buf
 
+
 def stats_handler(update: Update, context: CallbackContext):
     """
     Обработчик статистики: собирает статистику пользователя, форматирует её
@@ -67,7 +59,6 @@ def stats_handler(update: Update, context: CallbackContext):
     if 'user_messages' not in context.user_data:
         context.user_data['user_messages'] = []
     context.user_data['user_messages'].append(update.message.message_id)
-    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
 
     user_id = update.effective_user.id
     stats = get_user_statistics(user_id)
@@ -110,53 +101,30 @@ def stats_handler(update: Update, context: CallbackContext):
         if 'bot_messages' not in context.user_data:
             context.user_data['bot_messages'] = []
         context.user_data['bot_messages'].append(message.message_id)
-        logger.info(f"✅ Сообщение с графиком (ID: {message.message_id}) сохранено.")
     else:
         send_message_with_tracking(
             update, context,
             text="Динамический график недоступен."
         )
 
+
 def clear_user_sessions(update: Update, context: CallbackContext):
     """Удаляет все данные сессий пользователя."""
-    # Сохраняем ID сообщения пользователя (текст кнопки)
-    if 'user_messages' not in context.user_data:
-        context.user_data['user_messages'] = []
-    context.user_data['user_messages'].append(update.message.message_id)
-    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
-
     user_id = update.effective_user.id
 
     try:
-        # Удаляем сессии из таблицы session_stats
         db.cur.execute("DELETE FROM session_stats WHERE user_id = %s", (user_id,))
-        db.conn.commit()  # Подтверждаем изменения в базе данных
-        logger.info(f"[DEBUG] Все сессии пользователя {user_id} удалены.")
-
-        send_message_with_tracking(
-            update, context,
-            text="🗑 Все данные ваших сессий успешно очищены!",
-            reply_markup=stats_keyboard()  # Клавиатура статистики
-        )
+        db.conn.commit()
+        send_message_with_tracking(update, context, text="🗑 Все данные ваших сессий успешно очищены!", reply_markup=stats_keyboard())
     except Exception as e:
         logger.error(f"Ошибка при очистке сессий пользователя {user_id}: {e}")
-        send_message_with_tracking(
-            update, context,
-            text="❌ Произошла ошибка при очистке данных.",
-            reply_markup=stats_keyboard()  # Клавиатура статистики
-        )
+        send_message_with_tracking(update, context, text="❌ Произошла ошибка при очистке данных.", reply_markup=stats_keyboard())
+
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     """Сброс прогресса пользователя."""
-    # Проверяем, есть ли callback_query и message
-    if not update.callback_query:
+    if not update.callback_query or not update.callback_query.message:
         logger.error("❌ Не удалось определить источник обновления.")
-        return
-
-    # Проверяем, есть ли сообщение
-    if not update.callback_query.message:
-        logger.error("❌ Message внутри callback_query отсутствует.")
-        update.callback_query.answer("Ошибка: сообщение не найдено.")
         return
 
     user_id = update.effective_user.id
@@ -164,8 +132,6 @@ def reset_progress_handler(update: Update, context: CallbackContext):
         with db.conn:
             db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
         update.callback_query.answer("✅ Прогресс сброшен!")
-
-        # Передаём update и context в ask_question_handler
         ask_question_handler(update, context)
     except Exception as e:
         logger.error(f"Ошибка сброса: {e}")

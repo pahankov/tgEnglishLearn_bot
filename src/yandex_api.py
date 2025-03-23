@@ -10,22 +10,15 @@ class YandexDictionaryApi:
         self.base_url = "https://dictionary.yandex.net/api/v1/dicservice.json"
 
     def lookup(self, word: str, lang: str = "en-ru") -> dict | None:
-        """
-        Возвращает полный JSON-ответ API, как в первоначальной версии
-        """
+        """Возвращает полный JSON-ответ API."""
         try:
             response = requests.get(
                 f"{self.base_url}/lookup",
-                params={
-                    "key": self.api_key,
-                    "text": word,
-                    "lang": lang
-                },
-                timeout=5
+                params={"key": self.api_key, "text": word, "lang": lang},
+                timeout=5,
             )
             response.raise_for_status()
             return response.json()
-
         except requests.HTTPError as e:
             logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
             return None
@@ -33,12 +26,12 @@ class YandexDictionaryApi:
             logger.error(f"Request failed: {str(e)}")
             return None
 
-    def get_first_translation(self) -> str | None:
-        """
-        Отдельный метод для извлечения перевода (опционально)
-        """
-        data = self.lookup()
-        try:
-            return data['def'][0]['tr'][0]['text']
-        except (KeyError, IndexError, TypeError):
-            return None
+    def get_first_translation(self, word: str, lang: str = "en-ru") -> str | None:
+        """Возвращает первый перевод слова."""
+        data = self.lookup(word, lang)
+        if data:
+            try:
+                return data["def"][0]["tr"][0]["text"]
+            except (KeyError, IndexError, TypeError):
+                return None
+        return None
