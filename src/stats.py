@@ -148,18 +148,25 @@ def clear_user_sessions(update: Update, context: CallbackContext):
 
 def reset_progress_handler(update: Update, context: CallbackContext):
     """Сброс прогресса пользователя."""
-    # Сохраняем ID сообщения пользователя (текст кнопки)
-    if 'user_messages' not in context.user_data:
-        context.user_data['user_messages'] = []
-    context.user_data['user_messages'].append(update.message.message_id)
-    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+    # Проверяем, есть ли callback_query и message
+    if not update.callback_query:
+        logger.error("❌ Не удалось определить источник обновления.")
+        return
+
+    # Проверяем, есть ли сообщение
+    if not update.callback_query.message:
+        logger.error("❌ Message внутри callback_query отсутствует.")
+        update.callback_query.answer("Ошибка: сообщение не найдено.")
+        return
 
     user_id = update.effective_user.id
     try:
         with db.conn:
             db.cur.execute("DELETE FROM user_progress WHERE user_id = %s", (user_id,))
         update.callback_query.answer("✅ Прогресс сброшен!")
+
+        # Передаём update и context в ask_question_handler
         ask_question_handler(update, context)
     except Exception as e:
         logger.error(f"Ошибка сброса: {e}")
-        update.callback_query.answer("❌ Ошибка!")
+        update.callback_query.answer("❌ Ошибка при сбросе прогресса.")

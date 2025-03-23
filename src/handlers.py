@@ -56,7 +56,7 @@ def ask_question_handler(update: Update, context: CallbackContext):
     # Определяем, откуда пришло обновление: из сообщения или callback-запроса
     if update.message:
         message = update.message
-    elif update.callback_query:
+    elif update.callback_query and update.callback_query.message:
         message = update.callback_query.message
     else:
         logger.error("❌ Не удалось определить источник обновления.")
@@ -183,9 +183,13 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
         audio_file = sber_speech.synthesize_text(word)
 
         if audio_file:
-            # Отправляем аудио с произношением
+            # Отправляем аудио с произношением и сохраняем его ID
             with open(audio_file, "rb") as audio:
-                context.bot.send_audio(chat_id=query.message.chat.id, audio=audio)
+                message = context.bot.send_audio(chat_id=query.message.chat.id, audio=audio)
+                if 'bot_messages' not in context.user_data:
+                    context.user_data['bot_messages'] = []
+                context.user_data['bot_messages'].append(message.message_id)
+                logger.info(f"✅ Сообщение с аудио (ID: {message.message_id}) сохранено.")
             logger.info(f"Слово '{word}' успешно озвучено.")
         else:
             logger.error("Ошибка синтеза аудио.")
@@ -199,7 +203,7 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
         query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)
 
 def handle_menu_button(update: Update, context: CallbackContext):
-    """Обработчик кнопки 'В меню' для завершения сессии."""
+    """Обработка нажатия на кнопку 'В меню ↩️'."""
     # Сохраняем ID сообщения пользователя (текст кнопки)
     if 'user_messages' not in context.user_data:
         context.user_data['user_messages'] = []
@@ -207,54 +211,29 @@ def handle_menu_button(update: Update, context: CallbackContext):
     logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
 
     user_id = update.effective_user.id
-    logger.info(f"✅ Обработка нажатия кнопки 'В меню' для пользователя {user_id}.")
 
     # Проверка активной сессии
     if 'active_session' in context.user_data:
-        logger.info(f"⏱ Сохранение данных активной сессии для пользователя {user_id}.")
+        logger.info(f"⏱ Активная сессия найдена для пользователя {user_id}. Сохраняем данные...")
+        save_session_data(user_id, context)  # Сохраняем данные сессии
+        logger.info(f"✅ Данные сессии сохранены для пользователя {user_id}.")
+    else:
+        logger.info(f"❌ Активная сессия не найдена для пользователя {user_id}.")
 
-        # Сохранение данных сессии
-        try:
-            save_session_data(user_id, context)
-            logger.info(f"✅ Данные сессии успешно сохранены для пользователя {user_id}.")
-        except Exception as e:
-            logger.error(f"❌ Ошибка сохранения данных сессии: {e}")
+    # Удаляем все сообщения (ботов и пользователя), включая кнопки и аудиофайлы
+    delete_bot_messages(update, context)
 
-    # Очистка данных пользователя
-    logger.info(f"🗑 Очистка данных сессии для пользователя {user_id}.")
-    if 'job' in context.user_data:
-        try:
-            context.user_data['job'].schedule_removal()
-            logger.info(f"✅ Таймер успешно удален для пользователя {user_id}.")
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка удаления задачи таймера: {e}")
-        context.user_data.pop('job', None)
+    # Очищаем временные данные
+    context.user_data.clear()
+    logger.info(f"🗑 Данные сессии очищены для пользователя {user_id}.")
 
-    # Удаление данных, связанных с сессией
-    keys_to_remove = [
-        'active_session',
-        'current_state',
-        'word',
-        'translation',
-        'current_question',
-        'session_start',
-        'correct_answers'
-    ]
-    for key in keys_to_remove:
-        if key in context.user_data:
-            context.user_data.pop(key, None)
-            logger.debug(f"[DEBUG] Удален ключ '{key}' из user_data.")
-
-    # Отправка главного меню
-    try:
-        send_message_with_tracking(
-            update, context,
-            text="🏠 Главное меню:",
-            reply_markup=main_menu_keyboard()
-        )
-        logger.info(f"✅ Пользователю {user_id} отправлено главное меню.")
-    except Exception as e:
-        logger.error(f"❌ Ошибка при отправке главного меню для пользователя {user_id}: {e}")
+    # Отправляем главное меню
+    send_message_with_tracking(
+        update, context,
+        text="🏠 Возвращаемся в главное меню:",
+        reply_markup=main_menu_keyboard()
+    )
+    logger.info(f"✅ Пользователю {update.effective_user.id} отправлено главное меню.")
 
     # Возврат для явного завершения ConversationHandler
     return ConversationHandler.END

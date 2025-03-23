@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import telegram
-from telegram import Update, ReplyKeyboardRemove, ReplyKeyboardMarkup
-from telegram.ext import CallbackContext
+from telegram import Update, ReplyKeyboardRemove, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 import logging
 from src.keyboards import main_menu_keyboard, send_pronounce_button, MENU_BUTTON
@@ -133,7 +133,7 @@ def start_session(update: Update, context: CallbackContext):
     context.user_data.update({
         'session_start': session_start,
         'correct_answers': 0,
-        'active_session': True,
+        'active_session': True,  # Устанавливаем активную сессию
         'job': None
     })
     job = context.job_queue.run_once(
@@ -146,12 +146,29 @@ def start_session(update: Update, context: CallbackContext):
         name=str(user_id)
     )
     context.user_data['job'] = job
+
+    # Отправляем сообщение о начале сессии
     send_message_with_tracking(
         update, context,
         text="Сессия началась!",
         reply_markup=ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
     )
-    send_pronounce_button(update.effective_chat.id, context)
+
+    # Отправляем кнопку "Произношение слова 🔊" и сохраняем её ID
+    button = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Произношение слова 🔊", callback_data="pronounce_word")]
+    ])
+    message = context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Вы можете прослушать произношение слова здесь:",
+        reply_markup=button
+    )
+
+    # Сохраняем ID сообщения с кнопкой
+    if 'bot_messages' not in context.user_data:
+        context.user_data['bot_messages'] = []
+    context.user_data['bot_messages'].append(message.message_id)
+    logger.info(f"✅ Сообщение с кнопкой произношения (ID: {message.message_id}) сохранено.")
 
 def update_session_timer(context: CallbackContext, user_id: int):
     """Обновление таймера сессии."""
@@ -184,7 +201,10 @@ def delete_bot_messages(update: Update, context: CallbackContext):
                 context.bot.delete_message(chat_id=chat_id, message_id=message_id)
                 logger.info(f"✅ Сообщение бота (ID: {message_id}) удалено.")
             except telegram.error.BadRequest as e:
-                logger.warning(f"❌ Ошибка удаления сообщения бота {message_id}: {e}")
+                if "Message to delete not found" in str(e):
+                    logger.warning(f"❌ Сообщение бота (ID: {message_id}) уже удалено.")
+                else:
+                    logger.warning(f"❌ Ошибка удаления сообщения бота {message_id}: {e}")
             except Exception as e:
                 logger.error(f"❌ Неизвестная ошибка при удалении сообщения бота {message_id}: {e}")
 
@@ -199,7 +219,10 @@ def delete_bot_messages(update: Update, context: CallbackContext):
                 context.bot.delete_message(chat_id=chat_id, message_id=message_id)
                 logger.info(f"✅ Сообщение пользователя (ID: {message_id}) удалено.")
             except telegram.error.BadRequest as e:
-                logger.warning(f"❌ Ошибка удаления сообщения пользователя {message_id}: {e}")
+                if "Message to delete not found" in str(e):
+                    logger.warning(f"❌ Сообщение пользователя (ID: {message_id}) уже удалено.")
+                else:
+                    logger.warning(f"❌ Ошибка удаления сообщения пользователя {message_id}: {e}")
             except Exception as e:
                 logger.error(f"❌ Неизвестная ошибка при удалении сообщения пользователя {message_id}: {e}")
 
@@ -223,7 +246,7 @@ def send_message_with_tracking(update: Update, context: CallbackContext, text: s
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
-        elif update.callback_query:
+        elif update.callback_query and update.callback_query.message:
             message = update.callback_query.message.reply_text(
                 text=text,
                 reply_markup=reply_markup,
@@ -241,14 +264,35 @@ def send_message_with_tracking(update: Update, context: CallbackContext, text: s
 
     logger.info(f"✅ Сообщение (ID: {message_id}) сохранено для последующего удаления.")
 
-
 def handle_menu_button(update: Update, context: CallbackContext):
     """Обработка нажатия на кнопку 'В меню ↩️'."""
-    # Сохраняем ID сообщения пользователя
+    # Сохраняем ID сообщения пользователя (текст кнопки)
     if 'user_messages' not in context.user_data:
         context.user_data['user_messages'] = []
     context.user_data['user_messages'].append(update.message.message_id)
     logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
 
-    # Дальнейшая логика обработки кнопки
-    update.message.reply_text("Возвращаемся в меню...", reply_markup=main_menu_keyboard())
+    user_id = update.effective_user.id
+
+    # Проверка активной сессии
+    if 'active_session' in context.user_data:
+        logger.info(f"⏱ Активная сессия найдена для пользователя {user_id}. Сохраняем данные...")
+        save_session_data(user_id, context)  # Сохраняем данные сессии
+        context.user_data.clear()  # Очищаем данные сессии
+        logger.info(f"🗑 Данные сессии очищены для пользователя {user_id}.")
+    else:
+        logger.info(f"❌ Активная сессия не найдена для пользователя {user_id}.")
+
+    # Удаляем все сообщения (ботов и пользователя), включая кнопки и аудиофайлы
+    delete_bot_messages(update, context)
+
+    # Отправляем главное меню
+    send_message_with_tracking(
+        update, context,
+        text="🏠 Возвращаемся в главное меню:",
+        reply_markup=main_menu_keyboard()
+    )
+    logger.info(f"✅ Пользователю {update.effective_user.id} отправлено главное меню.")
+
+    # Возврат для явного завершения ConversationHandler
+    return ConversationHandler.END
