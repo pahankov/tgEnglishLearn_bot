@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 from src.keyboards import main_menu_keyboard, add_more_keyboard, delete_more_keyboard
-from src.session_manager import delete_bot_messages
+from src.session_manager import delete_bot_messages, send_message_with_tracking
 from src.yandex_api import YandexDictionaryApi
 import os
 import logging
@@ -31,8 +31,18 @@ def pluralize_words(count: int) -> str:
 # ================== Добавление слов ==================
 def add_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления слова"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Удаляем предыдущие сообщения (ботов и пользователя)
     delete_bot_messages(update, context)
-    update.message.reply_text(
+
+    # Отправляем новое сообщение с клавиатурой
+    send_message_with_tracking(
+        update, context,
         text="📝 Введите слово на русском языке:",
         reply_markup=add_more_keyboard()
     )
@@ -40,6 +50,12 @@ def add_word(update: Update, context: CallbackContext) -> int:
 
 def save_word(update: Update, context: CallbackContext) -> int:
     """Обработка введенного слова и сохранение в БД"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     input_text = update.message.text.strip().lower()
 
@@ -49,23 +65,36 @@ def save_word(update: Update, context: CallbackContext) -> int:
 
     # Проверка на пустой ввод
     if not input_text:
-        update.message.reply_text("❌ Введите слово!", reply_markup=add_more_keyboard())
+        send_message_with_tracking(
+            update, context,
+            text="❌ Введите слово!",
+            reply_markup=add_more_keyboard()
+        )
         return WAITING_WORD
 
     # Проверка на одно слово
     if len(input_text.split()) > 1:
-        update.message.reply_text("❌ Введите только ОДНО слово!", reply_markup=add_more_keyboard())
+        send_message_with_tracking(
+            update, context,
+            text="❌ Введите только ОДНО слово!",
+            reply_markup=add_more_keyboard()
+        )
         return WAITING_WORD
 
     # Проверка на русские буквы
     if not re.match(r'^[а-яё\-]+$', input_text):
-        update.message.reply_text("❌ Используйте только русские буквы!", reply_markup=add_more_keyboard())
+        send_message_with_tracking(
+            update, context,
+            text="❌ Используйте только русские буквы!",
+            reply_markup=add_more_keyboard()
+        )
         return WAITING_WORD
 
     # Проверка на дубликаты
     if db.check_duplicate(user_id, input_text):
-        update.message.reply_text(
-            f"❌ Слово '{input_text.capitalize()}' уже существует!",
+        send_message_with_tracking(
+            update, context,
+            text=f"❌ Слово '{input_text.capitalize()}' уже существует!",
             reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
@@ -79,13 +108,18 @@ def save_word(update: Update, context: CallbackContext) -> int:
         first_translation = api_response['def'][0]['tr'][0]['text'].lower()
     except Exception as e:
         logger.error(f"Ошибка перевода: {str(e)}")
-        update.message.reply_text("❌ Не удалось получить перевод!", reply_markup=add_more_keyboard())
+        send_message_with_tracking(
+            update, context,
+            text="❌ Не удалось получить перевод!",
+            reply_markup=add_more_keyboard()
+        )
         return WAITING_WORD
 
     # Проверка на дубликат перевода
     if db.check_duplicate(user_id, first_translation):
-        update.message.reply_text(
-            f"❌ Перевод '{first_translation.capitalize()}' уже существует!",
+        send_message_with_tracking(
+            update, context,
+            text=f"❌ Перевод '{first_translation.capitalize()}' уже существует!",
             reply_markup=add_more_keyboard()
         )
         return WAITING_WORD
@@ -93,13 +127,18 @@ def save_word(update: Update, context: CallbackContext) -> int:
     # Добавление слова в базу данных
     if db.add_user_word(user_id, first_translation, input_text):
         count = db.count_user_words(user_id)
-        update.message.reply_text(
-            f"✅ Успешно добавлено: {input_text.capitalize()} по слову {first_translation.capitalize()}\n"
-            f"📚 Всего слов добавлено: {count}",
+        send_message_with_tracking(
+            update, context,
+            text=f"✅ Успешно добавлено: {input_text.capitalize()} по слову {first_translation.capitalize()}\n"
+                 f"📚 Всего слов добавлено: {count}",
             reply_markup=add_more_keyboard()
         )
     else:
-        update.message.reply_text("❌ Ошибка при добавлении!", reply_markup=main_menu_keyboard())
+        send_message_with_tracking(
+            update, context,
+            text="❌ Ошибка при добавлении!",
+            reply_markup=main_menu_keyboard()
+        )
         return ConversationHandler.END
 
     return WAITING_WORD
@@ -107,8 +146,18 @@ def save_word(update: Update, context: CallbackContext) -> int:
 # ================== Удаление слов ==================
 def delete_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса удаления"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Удаляем предыдущие сообщения (ботов и пользователя)
     delete_bot_messages(update, context)
-    update.message.reply_text(
+
+    # Отправляем новое сообщение с клавиатурой
+    send_message_with_tracking(
+        update, context,
         text="🗑 Введите слово для удаления (русское или английское):",
         reply_markup=delete_more_keyboard()
     )
@@ -116,6 +165,12 @@ def delete_word(update: Update, context: CallbackContext) -> int:
 
 def confirm_delete(update: Update, context: CallbackContext) -> int:
     """Обработка удаления и предложение продолжить"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     word = update.message.text.strip().lower()
 
@@ -125,13 +180,15 @@ def confirm_delete(update: Update, context: CallbackContext) -> int:
 
     # Логика удаления слова
     if db.delete_user_word(user_id, word):
-        update.message.reply_text(
-            f"✅ Слово/перевод '{word}' успешно удалено!",
+        send_message_with_tracking(
+            update, context,
+            text=f"✅ Слово/перевод '{word}' успешно удалено!",
             reply_markup=delete_more_keyboard()
         )
     else:
-        update.message.reply_text(
-            f"❌ Слово '{word}' не найдено в вашем словаре!",
+        send_message_with_tracking(
+            update, context,
+            text=f"❌ Слово '{word}' не найдено в вашем словаре!",
             reply_markup=delete_more_keyboard()
         )
 
@@ -140,10 +197,22 @@ def confirm_delete(update: Update, context: CallbackContext) -> int:
 # ================== Обработка кнопки "Назад" ==================
 def handle_back_to_menu(update: Update, context: CallbackContext):
     """Обработчик кнопки 'Назад' с полным сбросом состояния"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Удаляем предыдущие сообщения (ботов и пользователя)
     delete_bot_messages(update, context)
-    context.user_data.clear()  # Очищаем временные данные
-    update.message.reply_text(
-        "🏠 Возвращаемся в главное меню:",
+
+    # Очищаем временные данные
+    context.user_data.clear()
+
+    # Возвращаем пользователя в главное меню
+    send_message_with_tracking(
+        update, context,
+        text="🏠 Возвращаемся в главное меню:",
         reply_markup=main_menu_keyboard()
     )
     return ConversationHandler.END
@@ -151,25 +220,34 @@ def handle_back_to_menu(update: Update, context: CallbackContext):
 # ================== Показ слов ==================
 def show_user_words(update: Update, context: CallbackContext):
     """Отображение списка пользовательских слов"""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     try:
         words = db.get_user_words(user_id)
         if not words:
-            update.message.reply_text(
-                "📭 Ваш словарь пока пуст!",
+            send_message_with_tracking(
+                update, context,
+                text="📭 Ваш словарь пока пуст!",
                 reply_markup=main_menu_keyboard()
             )
             return
 
         formatted = [f"• {en.capitalize()} - {ru.capitalize()}" for en, ru in words]
         count = len(words)
-        update.message.reply_text(
-            f"📖 Ваши слова ({count} {pluralize_words(count)}):\n" + "\n".join(formatted),
+        send_message_with_tracking(
+            update, context,
+            text=f"📖 Ваши слова ({count} {pluralize_words(count)}):\n" + "\n".join(formatted),
             reply_markup=main_menu_keyboard()
         )
     except Exception as e:
         logger.error(f"Ошибка показа слов: {str(e)}")
-        update.message.reply_text(
-            "❌ Ошибка при загрузке слов!",
+        send_message_with_tracking(
+            update, context,
+            text="❌ Ошибка при загрузке слов!",
             reply_markup=main_menu_keyboard()
         )

@@ -1,18 +1,15 @@
 import os
 import random
 import logging
-import re
-import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 from src.quiz import QuizManager
-from src.keyboards import main_menu_keyboard, answer_keyboard,  send_pronounce_button, \
-MENU_BUTTON
+from src.keyboards import main_menu_keyboard, answer_keyboard, send_pronounce_button, MENU_BUTTON
 from src.sberspeech_api import SberSpeechAPI
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-from src.session_manager import check_session_timeout, update_session_timer, start_session, delete_bot_messages
+from src.session_manager import check_session_timeout, update_session_timer, start_session, delete_bot_messages, send_message_with_tracking
 from datetime import datetime
 from src.session_manager import save_session_data
 
@@ -25,29 +22,52 @@ if not YANDEX_API_KEY:
     raise ValueError("Ключ API Яндекс.Словаря не найден.")
 yandex_api = YandexDictionaryApi(api_key=YANDEX_API_KEY)
 
-
 # ================== Обработчики для главного меню и сессии ==================
 
 def start_handler(update: Update, context: CallbackContext):
+    """Обработчик команды /start."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Удаляем предыдущие сообщения (ботов и пользователя)
     delete_bot_messages(update, context)
+
     user = update.effective_user
+
+    # Проверяем, существует ли пользователь, и создаём, если нет
     if not db.get_user(user.id):
         db.create_user(user.id, user.username, user.first_name)
         logger.info(f"Создан пользователь: {user.first_name} (ID: {user.id})")
     else:
         logger.info(f"Пользователь {user.first_name} (ID: {user.id}) уже существует")
-    update.message.reply_text(
-        f"Привет, {user.first_name}! Я помогу тебе учить английский.",
+
+    # Отправляем приветственное сообщение с сохранением ID
+    send_message_with_tracking(
+        update, context,
+        text=f"Привет, {user.first_name}! Я помогу тебе учить английский.",
         reply_markup=main_menu_keyboard()
     )
 
-
-
-
-
-
 def ask_question_handler(update: Update, context: CallbackContext):
     """Генерация нового вопроса и управление сессией."""
+    # Определяем, откуда пришло обновление: из сообщения или callback-запроса
+    if update.message:
+        message = update.message
+    elif update.callback_query:
+        message = update.callback_query.message
+    else:
+        logger.error("❌ Не удалось определить источник обновления.")
+        return
+
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
 
     # Если сессия ещё не начата
@@ -64,8 +84,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
             save_session_data(user_id, context)
             context.user_data.clear()
             keyboard = [[InlineKeyboardButton("Начать заново 🔄", callback_data="reset_progress")]]
-            context.bot.send_message(
-                chat_id=update.effective_chat.id,
+            send_message_with_tracking(
+                update, context,
                 text="🎉 Вы изучили все слова! Отличная работа!",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -93,8 +113,8 @@ def ask_question_handler(update: Update, context: CallbackContext):
         "options": options
     }
 
-    context.bot.send_message(
-        chat_id=update.effective_chat.id,
+    send_message_with_tracking(
+        update, context,
         text=f"Переведи слово: *{word_en.capitalize()}*",
         parse_mode="Markdown",
         reply_markup=answer_keyboard(options)
@@ -132,6 +152,7 @@ def button_click_handler(update: Update, context: CallbackContext):
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения: {e}")
 
+        # Передаём update и context в ask_question_handler
         ask_question_handler(update, context)
     else:
         options = current_question["options"]
@@ -141,7 +162,6 @@ def button_click_handler(update: Update, context: CallbackContext):
         except Exception as e:
             logger.warning(f"Ошибка обновления клавиатуры: {e}")
         query.answer(quiz.get_incorrect_response())
-
 
 def pronounce_word_handler(update: Update, context: CallbackContext):
     """Обработчик для воспроизведения произношения текущего слова."""
@@ -178,9 +198,14 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
         logger.error(f"Ошибка в pronounce_word_handler: {e}")
         query.answer("❌ Возникла ошибка при обработке запроса.", show_alert=True)
 
-
 def handle_menu_button(update: Update, context: CallbackContext):
     """Обработчик кнопки 'В меню' для завершения сессии."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     logger.info(f"✅ Обработка нажатия кнопки 'В меню' для пользователя {user_id}.")
 
@@ -222,7 +247,8 @@ def handle_menu_button(update: Update, context: CallbackContext):
 
     # Отправка главного меню
     try:
-        update.message.reply_text(
+        send_message_with_tracking(
+            update, context,
             text="🏠 Главное меню:",
             reply_markup=main_menu_keyboard()
         )

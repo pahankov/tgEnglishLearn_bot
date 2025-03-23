@@ -4,6 +4,7 @@ import matplotlib
 
 from src.handlers import ask_question_handler
 from src.keyboards import stats_keyboard
+from src.session_manager import send_message_with_tracking
 
 matplotlib.use('Agg')  # Используем backend, не зависящий от дисплея
 import matplotlib.pyplot as plt
@@ -13,8 +14,6 @@ from telegram.ext import CallbackContext
 from src import db
 
 logger = logging.getLogger(__name__)
-
-
 
 def get_user_statistics(user_id: int) -> dict:
     stats = {}
@@ -42,8 +41,6 @@ def get_user_statistics(user_id: int) -> dict:
 
     return stats
 
-
-# stats.py
 def generate_stats_chart(session_stats):
     dates = [s[0].strftime("%Y-%m-%d %H:%M") for s in session_stats]
     words = [s[1] for s in session_stats]
@@ -61,12 +58,17 @@ def generate_stats_chart(session_stats):
     buf.seek(0)
     return buf
 
-
 def stats_handler(update: Update, context: CallbackContext):
     """
     Обработчик статистики: собирает статистику пользователя, форматирует её
     в виде текстового отчёта, предоставляет клавиатуру и отправляет график.
     """
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     stats = get_user_statistics(user_id)
 
@@ -87,24 +89,42 @@ def stats_handler(update: Update, context: CallbackContext):
         text += "\nСтатистика сессий отсутствует.\n"
 
     # Отправка текста со статистикой
-    update.message.reply_text(text, parse_mode="Markdown")
+    send_message_with_tracking(
+        update, context,
+        text=text,
+        parse_mode="Markdown"
+    )
 
     # Отправка клавиатуры для действий со статистикой
-    update.message.reply_text(
-        "Выберите действие:",
+    send_message_with_tracking(
+        update, context,
+        text="Выберите действие:",
         reply_markup=stats_keyboard()
     )
 
     # Генерация и отправка динамического графика
     chart_buf = generate_stats_chart(session_stats)
     if chart_buf:
-        update.message.reply_photo(photo=chart_buf)
+        # Отправляем график и сохраняем его ID
+        message = update.message.reply_photo(photo=chart_buf)
+        if 'bot_messages' not in context.user_data:
+            context.user_data['bot_messages'] = []
+        context.user_data['bot_messages'].append(message.message_id)
+        logger.info(f"✅ Сообщение с графиком (ID: {message.message_id}) сохранено.")
     else:
-        update.message.reply_text("Динамический график недоступен.")
-
+        send_message_with_tracking(
+            update, context,
+            text="Динамический график недоступен."
+        )
 
 def clear_user_sessions(update: Update, context: CallbackContext):
     """Удаляет все данные сессий пользователя."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
 
     try:
@@ -113,18 +133,27 @@ def clear_user_sessions(update: Update, context: CallbackContext):
         db.conn.commit()  # Подтверждаем изменения в базе данных
         logger.info(f"[DEBUG] Все сессии пользователя {user_id} удалены.")
 
-        update.message.reply_text(
-            "🗑 Все данные ваших сессий успешно очищены!",
+        send_message_with_tracking(
+            update, context,
+            text="🗑 Все данные ваших сессий успешно очищены!",
             reply_markup=stats_keyboard()  # Клавиатура статистики
         )
     except Exception as e:
         logger.error(f"Ошибка при очистке сессий пользователя {user_id}: {e}")
-        update.message.reply_text(
-            "❌ Произошла ошибка при очистке данных.",
+        send_message_with_tracking(
+            update, context,
+            text="❌ Произошла ошибка при очистке данных.",
             reply_markup=stats_keyboard()  # Клавиатура статистики
         )
 
 def reset_progress_handler(update: Update, context: CallbackContext):
+    """Сброс прогресса пользователя."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     try:
         with db.conn:

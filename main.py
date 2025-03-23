@@ -15,8 +15,9 @@ from src.handlers import (
     ask_question_handler,
     button_click_handler,
     pronounce_word_handler,
-    handle_menu_button
+    handle_menu_button  # Импортируем новый обработчик
 )
+
 from src.stats import stats_handler, clear_user_sessions, reset_progress_handler
 from src.word_management import (
     add_word,
@@ -49,6 +50,7 @@ def main():
     # 1. Глобальные обработчики
     dispatcher.add_handler(CommandHandler("start", start_handler))
     dispatcher.add_handler(MessageHandler(Filters.regex(r"^В меню ↩️$"), handle_menu_button))
+
 
 
     # 2. ConversationHandlers

@@ -8,7 +8,6 @@ from src.keyboards import main_menu_keyboard, send_pronounce_button, MENU_BUTTON
 
 logger = logging.getLogger(__name__)
 
-
 def save_session_data(user_id, context):
     """Сохраняет статистику сессии в базу данных."""
     logger.info(f"✅ Начало сохранения данных сессии для пользователя {user_id}.")
@@ -41,7 +40,6 @@ def save_session_data(user_id, context):
             f"✅ Сессия сохранена в базу данных: user_id={user_id}, слова={learned_words}, длительность={duration} сек.")
     except Exception as e:
         logger.error(f"❌ Ошибка при сохранении данных сессии: {e}")
-
 
 def check_session_timeout(context: CallbackContext):
     """Автоматическое завершение сессии по таймауту."""
@@ -86,9 +84,14 @@ def check_session_timeout(context: CallbackContext):
     except Exception as e:
         logger.error(f"❌ Ошибка при завершении сессии по таймауту: {e}")
 
-
 def end_session(update: Update, context: CallbackContext):
     """Завершает текущую сессию вручную."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
     user_id = update.effective_user.id
     logger.info(f"✅ Ручное завершение сессии для пользователя {user_id}.")
 
@@ -99,24 +102,32 @@ def end_session(update: Update, context: CallbackContext):
         logger.info(f"🗑 Данные сессии очищены для пользователя {user_id}.")
 
     # Уведомление пользователя
-    update.message.reply_text(
-        "⏳ Очищаем интерфейс...",
+    send_message_with_tracking(
+        update, context,
+        text="⏳ Очищаем интерфейс...",
         reply_markup=ReplyKeyboardRemove()
     )
-    update.message.reply_text(
-        "Сессия завершена. Возвращаем вас в главное меню.",
+    send_message_with_tracking(
+        update, context,
+        text="Сессия завершена. Возвращаем вас в главное меню.",
         reply_markup=main_menu_keyboard()
     )
     logger.info(f"✅ Пользователю {user_id} отправлено уведомление об окончании сессии.")
-
-
 
 # Константы для таймаута сессии
 SESSION_TIMEOUT = 900  # 15 минут в секундах
 
 def start_session(update: Update, context: CallbackContext):
     """Инициализация новой сессии."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Удаляем предыдущие сообщения (ботов и пользователя)
     delete_bot_messages(update, context)
+
     user_id = update.effective_user.id
     session_start = datetime.now()
     context.user_data.update({
@@ -135,8 +146,9 @@ def start_session(update: Update, context: CallbackContext):
         name=str(user_id)
     )
     context.user_data['job'] = job
-    update.effective_message.reply_text(
-        "Сессия началась!",
+    send_message_with_tracking(
+        update, context,
+        text="Сессия началась!",
         reply_markup=ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
     )
     send_pronounce_button(update.effective_chat.id, context)
@@ -160,17 +172,83 @@ def update_session_timer(context: CallbackContext, user_id: int):
     )
     context.user_data['job'] = new_job
 
-
 def delete_bot_messages(update: Update, context: CallbackContext):
-    """Удаление последних N сообщений бота в чате."""
-    try:
-        chat_id = update.effective_chat.id
-        max_messages_to_check = 15  # Например, обрабатываем только последние 15 сообщений
-        for message_id in range(update.message.message_id, update.message.message_id - max_messages_to_check, -1):
+    """Удаление всех сообщений бота и пользователя, сохранённых в user_data."""
+    chat_id = update.effective_chat.id
+
+    # Удаляем сообщения бота
+    if 'bot_messages' in context.user_data:
+        logger.info(f"Удаляем сообщения бота: {context.user_data['bot_messages']}")
+        for message_id in context.user_data['bot_messages']:
             try:
                 context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                logger.info(f"✅ Сообщение бота (ID: {message_id}) удалено.")
             except telegram.error.BadRequest as e:
-                logger.warning(f"Ошибка удаления сообщения {message_id}: {e}")
-    except Exception as e:
-        logger.error(f"Не удалось очистить чат: {e}")
+                logger.warning(f"❌ Ошибка удаления сообщения бота {message_id}: {e}")
+            except Exception as e:
+                logger.error(f"❌ Неизвестная ошибка при удалении сообщения бота {message_id}: {e}")
 
+        # Очищаем список сообщений бота
+        context.user_data['bot_messages'] = []
+
+    # Удаляем сообщения пользователя
+    if 'user_messages' in context.user_data:
+        logger.info(f"Удаляем сообщения пользователя: {context.user_data['user_messages']}")
+        for message_id in context.user_data['user_messages']:
+            try:
+                context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                logger.info(f"✅ Сообщение пользователя (ID: {message_id}) удалено.")
+            except telegram.error.BadRequest as e:
+                logger.warning(f"❌ Ошибка удаления сообщения пользователя {message_id}: {e}")
+            except Exception as e:
+                logger.error(f"❌ Неизвестная ошибка при удалении сообщения пользователя {message_id}: {e}")
+
+        # Очищаем список сообщений пользователя
+        context.user_data['user_messages'] = []
+
+
+def send_message_with_tracking(update: Update, context: CallbackContext, text: str, reply_markup=None, parse_mode=None, is_user_message=False):
+    """
+    Отправка сообщения и сохранение его ID.
+    Если is_user_message=True, сохраняем ID сообщения пользователя.
+    """
+    if is_user_message:
+        # Сохраняем ID сообщения пользователя
+        message_id = update.message.message_id
+    else:
+        # Определяем, откуда пришло обновление: из сообщения или callback-запроса
+        if update.message:
+            message = update.message.reply_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        elif update.callback_query:
+            message = update.callback_query.message.reply_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        else:
+            logger.error("❌ Не удалось определить источник обновления.")
+            return
+        message_id = message.message_id
+
+    # Сохраняем ID сообщения в user_data
+    if 'bot_messages' not in context.user_data:
+        context.user_data['bot_messages'] = []  # Создаём список, если его нет
+    context.user_data['bot_messages'].append(message_id)
+
+    logger.info(f"✅ Сообщение (ID: {message_id}) сохранено для последующего удаления.")
+
+
+def handle_menu_button(update: Update, context: CallbackContext):
+    """Обработка нажатия на кнопку 'В меню ↩️'."""
+    # Сохраняем ID сообщения пользователя
+    if 'user_messages' not in context.user_data:
+        context.user_data['user_messages'] = []
+    context.user_data['user_messages'].append(update.message.message_id)
+    logger.info(f"✅ Сообщение пользователя (ID: {update.message.message_id}) сохранено.")
+
+    # Дальнейшая логика обработки кнопки
+    update.message.reply_text("Возвращаемся в меню...", reply_markup=main_menu_keyboard())
