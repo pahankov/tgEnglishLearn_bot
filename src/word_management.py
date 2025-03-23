@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import CallbackContext, ConversationHandler
 from src import db
 from src.keyboards import main_menu_keyboard, add_more_keyboard, delete_more_keyboard
+from src.session_manager import delete_bot_messages
 from src.yandex_api import YandexDictionaryApi
 import os
 import logging
@@ -30,6 +31,7 @@ def pluralize_words(count: int) -> str:
 # ================== Добавление слов ==================
 def add_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления слова"""
+    delete_bot_messages(update, context)
     update.message.reply_text(
         text="📝 Введите слово на русском языке:",
         reply_markup=add_more_keyboard()
@@ -105,6 +107,7 @@ def save_word(update: Update, context: CallbackContext) -> int:
 # ================== Удаление слов ==================
 def delete_word(update: Update, context: CallbackContext) -> int:
     """Начало процесса удаления"""
+    delete_bot_messages(update, context)
     update.message.reply_text(
         text="🗑 Введите слово для удаления (русское или английское):",
         reply_markup=delete_more_keyboard()
@@ -137,6 +140,7 @@ def confirm_delete(update: Update, context: CallbackContext) -> int:
 # ================== Обработка кнопки "Назад" ==================
 def handle_back_to_menu(update: Update, context: CallbackContext):
     """Обработчик кнопки 'Назад' с полным сбросом состояния"""
+    delete_bot_messages(update, context)
     context.user_data.clear()  # Очищаем временные данные
     update.message.reply_text(
         "🏠 Возвращаемся в главное меню:",

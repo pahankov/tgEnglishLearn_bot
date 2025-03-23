@@ -8,13 +8,6 @@ from src.keyboards import main_menu_keyboard, send_pronounce_button, MENU_BUTTON
 
 logger = logging.getLogger(__name__)
 
-from datetime import datetime, timedelta
-
-from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 def save_session_data(user_id, context):
     """Сохраняет статистику сессии в базу данных."""
@@ -172,7 +165,7 @@ def delete_bot_messages(update: Update, context: CallbackContext):
     """Удаление последних N сообщений бота в чате."""
     try:
         chat_id = update.effective_chat.id
-        max_messages_to_check = 20  # Например, обрабатываем только последние 20 сообщений
+        max_messages_to_check = 15  # Например, обрабатываем только последние 15 сообщений
         for message_id in range(update.message.message_id, update.message.message_id - max_messages_to_check, -1):
             try:
                 context.bot.delete_message(chat_id=chat_id, message_id=message_id)

@@ -12,7 +12,7 @@ MENU_BUTTON
 from src.sberspeech_api import SberSpeechAPI
 from src.yandex_api import YandexDictionaryApi
 from dotenv import load_dotenv
-from src.session_manager import check_session_timeout, update_session_timer, start_session
+from src.session_manager import check_session_timeout, update_session_timer, start_session, delete_bot_messages
 from datetime import datetime
 from src.session_manager import save_session_data
 
@@ -29,6 +29,7 @@ yandex_api = YandexDictionaryApi(api_key=YANDEX_API_KEY)
 # ================== Обработчики для главного меню и сессии ==================
 
 def start_handler(update: Update, context: CallbackContext):
+    delete_bot_messages(update, context)
     user = update.effective_user
     if not db.get_user(user.id):
         db.create_user(user.id, user.username, user.first_name)
