@@ -112,13 +112,36 @@ def clear_user_sessions(update: Update, context: CallbackContext):
     """Удаляет все данные сессий пользователя."""
     user_id = update.effective_user.id
 
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if "user_messages" not in context.user_data:
+        context.user_data["user_messages"] = []
+    if update.message:
+        context.user_data["user_messages"].append(update.message.message_id)
+    else:
+        return  # Если сообщение отсутствует, дальнейшее выполнение не требуется.
+
+    # Удаление данных сессии пользователя из базы данных
     try:
-        db.cur.execute("DELETE FROM session_stats WHERE user_id = %s", (user_id,))
+        db.cur.execute(
+            "DELETE FROM session_stats WHERE user_id = %s",
+            (user_id,)
+        )
         db.conn.commit()
-        send_message_with_tracking(update, context, text="🗑 Все данные ваших сессий успешно очищены!", reply_markup=stats_keyboard())
-    except Exception as e:
-        logger.error(f"Ошибка при очистке сессий пользователя {user_id}: {e}")
-        send_message_with_tracking(update, context, text="❌ Произошла ошибка при очистке данных.", reply_markup=stats_keyboard())
+
+        send_message_with_tracking(
+            update,
+            context,
+            text="🗑 Все данные ваших сессий успешно очищены!",
+            reply_markup=stats_keyboard(),
+        )
+    except Exception:
+        send_message_with_tracking(
+            update,
+            context,
+            text="❌ Произошла ошибка при очистке данных.",
+            reply_markup=stats_keyboard(),
+        )
+
 
 
 def reset_progress_handler(update: Update, context: CallbackContext):

@@ -189,19 +189,33 @@ def pronounce_word_handler(update: Update, context: CallbackContext):
 
 def handle_menu_button(update: Update, context: CallbackContext):
     """Обработка нажатия на кнопку 'В меню ↩️'."""
+    # Сохраняем ID сообщения пользователя (текст кнопки)
+    if "user_messages" not in context.user_data:
+        context.user_data["user_messages"] = []
+    if update.message:
+        context.user_data["user_messages"].append(update.message.message_id)
+        logger.info(
+            "✅ Сообщение пользователя (ID: %s) сохранено.",
+            update.message.message_id,
+        )
+    else:
+        logger.warning("⚠️ Сообщение пользователя отсутствует, сохранение невозможно.")
+
     user_id = update.effective_user.id
 
     # Проверка активной сессии
     if "active_session" in context.user_data:
         save_session_data(user_id, context)
-        logger.info(f"Session data saved for user {user_id}.")
+        logger.info("✅ Данные сессии сохранены для пользователя %s.", user_id)
+    else:
+        logger.info("❌ Активная сессия не найдена для пользователя %s.", user_id)
 
     # Удаляем все сообщения
     delete_bot_messages(update, context)
 
     # Очищаем временные данные
     context.user_data.clear()
-    logger.info(f"Session data cleared for user {user_id}.")
+    logger.info("🗑 Данные пользователя очищены для %s.", user_id)
 
     # Отправляем главное меню
     send_message_with_tracking(
@@ -210,5 +224,8 @@ def handle_menu_button(update: Update, context: CallbackContext):
         text="🏠 Возвращаемся в главное меню:",
         reply_markup=main_menu_keyboard(),
     )
+    logger.info("✅ Пользователю %s отправлено главное меню.", user_id)
 
+    # Завершаем обработку
     return ConversationHandler.END
+
